@@ -1,0 +1,6 @@
+config.py
+millnet_cookies.pickle
+venv
+__pycache__
+timerec-pro.db
+timerec_temp.gz

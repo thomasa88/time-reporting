@@ -1,0 +1,13 @@
+import getpass
+
+username='myname@mycompany.com'
+def ask_password():
+    return getpass.getpass(f'Millnet password for {username}: ')
+baseurl='https://mycompany.millnet.cloud'
+google_fileid="Ab10ehEUGHABTUIGITna"
+timerec_db_filename="timerec-pro.db"
+
+# Use the "dump-tasks" command to find the available Millnet activities
+activity_mapping = { ('Customer', 'Project'): ('Project', 'Activity'),
+                     ('A', 'B'): ('C', 'D'),
+                     }
