@@ -1,5 +1,5 @@
 config.py
-millnet_cookies.pickle
+*.pickle
 venv
 __pycache__
 timerec-pro.db

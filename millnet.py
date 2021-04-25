@@ -154,7 +154,7 @@ class Session:
          'projectnr': 'P000-000',
          'disabled': '0'}
         '''
-        timestamp = str(time.time() * 1000) # Browser cache protection?
+        timestamp = str(int(time.time() * 1000)) # Browser cache protection?
         params = {
             'param1': 'mt-get-projects',
             '_dc': timestamp,
