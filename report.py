@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
 
+# This file is part of time-reporting.
+#
+# Copyright (C) 2021  Thomas Axelsson
+#
+# VerticalTimeline is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# VerticalTimeline is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with time-reporting.  If not, see <https://www.gnu.org/licenses/>.
+
 import argparse
 import calendar
 from collections import defaultdict
@@ -11,6 +28,7 @@ import config
 import googledrive
 import timerec
 import millnet
+import flexhrm
 
 def parse_args():
     arg_parser = argparse.ArgumentParser()
@@ -20,8 +38,6 @@ def parse_args():
     parser_dump.set_defaults(func=run_dump)
 
     parser_report = arg_subparsers.add_parser('report')
-    #parser_report.add_argument('--year', type=int, default=datetime.date.today().year)
-    #parser_report.add_argument('--month', type=int, required=True)
     parser_report.add_argument('-D', '--no-dl', action='store_true',
                                help="Don't download the Time Recording database (use cached)")
     parser_report.add_argument('-n', '--dry-run', action='store_true',
@@ -29,6 +45,26 @@ def parse_args():
     parser_report.add_argument('range',
                                help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
     parser_report.set_defaults(func=run_report)
+
+    parser_flexhrm = arg_subparsers.add_parser('flexhrm')
+    flexhrm_subparsers = parser_flexhrm.add_subparsers(dest='subcommand',
+                                                       required=True)
+    parser_flexhrm_find_project = flexhrm_subparsers.add_parser('find-project')
+    parser_flexhrm_find_project.set_defaults(func=run_flexhrm_find_project)
+    parser_flexhrm_find_project.add_argument('name')
+
+    parser_flexhrm_find_company = flexhrm_subparsers.add_parser('find-company')
+    parser_flexhrm_find_company.set_defaults(func=run_flexhrm_find_company)
+    parser_flexhrm_find_company.add_argument('name')
+
+    parser_flexhrm_report = flexhrm_subparsers.add_parser('report')
+    parser_flexhrm_report.set_defaults(func=run_flexhrm_report)
+    parser_flexhrm_report.add_argument('-D', '--no-dl', action='store_true',
+                                       help="Don't download the Time Recording database (use cached)")
+    parser_flexhrm_report.add_argument('-n', '--dry-run', action='store_true',
+                                       help="Don't upload hours to Millnet")
+    parser_flexhrm_report.add_argument('range',
+                                       help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
 
     args = arg_parser.parse_args()
     args.func(args, arg_parser)
@@ -75,8 +111,8 @@ def fetch_millnet_user_activities(millnet_session):
 def days_in_month(date):
     return calendar.monthrange(date.year, date.month)[1]
 
-def run_report(args, arg_parser):
-    begin_str, sep, end_str = args.range.partition('-')
+def parse_report_range(range_str):
+    begin_str, sep, end_str = range_str.partition('-')
 
     # end_date is inclusive
     end_date = None
@@ -93,11 +129,14 @@ def run_report(args, arg_parser):
             end_date = datetime.date(begin_date.year, begin_date.month,
                                      days_in_month(begin_date))
         else:
-            arg_parser.error('Bad date range')
+            raise Exception(f'Bad date range: {range_str}')
     if not end_date:
         end_date = begin_date
+    return begin_date, end_date
 
-    
+def run_report(args, arg_parser):
+    begin_date, end_date = parse_report_range(args.range)
+
     print(f"Date range: {begin_date} - {end_date}")
 
     if not args.no_dl:
@@ -143,4 +182,60 @@ def run_dump(args, arg_parser):
         for row in fetch_millnet_user_activities(m):
             print((row[1], row[3]))
 
+def run_flexhrm_find_project(args, arg_parser):
+    with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
+                         config.flexhrm_ask_password) as flex:
+        for label, guid in flex.find_project(args.name):
+            print(guid, label)
+
+def run_flexhrm_find_company(args, arg_parser):
+    with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
+                         config.flexhrm_ask_password) as flex:
+        for label, guid in flex.find_company(args.name):
+            print(guid, label)
+
+def run_flexhrm_report(args, arg_parser):
+    begin_date, end_date = parse_report_range(args.range)
+
+    print(f"Date range: {begin_date} - {end_date}")
+
+    if not args.no_dl:
+        print("Downloading latest Time Recording database...")
+        download_timerec_db()
+
+    with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
+                         config.flexhrm_ask_password) as flex:
+        days = []
+        one_day = datetime.timedelta(days=1)
+        current_date = begin_date
+        # Collect all data before reporting, to be sure that the mapping succeeds
+        print("Collecting...")
+        while current_date <= end_date:
+            tr = timerec.TimeRecording(config.timerec_db_filename)
+            day_entries = tr.get_day(current_date)
+            for entry in day_entries:
+                map_entry(entry, 'timerec', 'flexhrm')
+            days.append((current_date, day_entries))
+            current_date += one_day
+            print([str(d) for d in day_entries])
+
+        print("Reporting...")
+        if args.dry_run:
+            print("DRY RUN")
+        for date, entries in days:
+            print(date)
+            if not args.dry_run:
+                flex.set_day(date, entries)
+        print("Done")
+
+def map_entry(entry, from_system, to_system):
+    index = config.account_mapping[from_system].index(entry.account[from_system])
+    entry.account[to_system] = config.account_mapping[to_system][index]
+
+def check_mappings():
+    # TODO: Check that all mapping lists have equal length
+    # Only when using them?
+    pass
+
+check_mappings()
 parse_args()

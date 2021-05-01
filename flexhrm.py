@@ -1,4 +1,19 @@
-#!/usr/bin/env python3
+# This file is part of time-reporting.
+#
+# Copyright (C) 2021  Thomas Axelsson
+#
+# VerticalTimeline is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# VerticalTimeline is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with time-reporting.  If not, see <https://www.gnu.org/licenses/>.
 
 import datetime
 import requests
@@ -10,9 +25,13 @@ import bs4
 COOKIE_FILE = 'flexhrm_cookies.pickle'
 
 class Session:
-    def __init__(self, baseurl, flexhrm_customer_id, username, ask_password):
+    # Index is important. ForetagKonteringsdimensionId does not decide type.
+    # Are these IDs universal??
+    COMPANY_ACCOUNT_COL_INDEX = 4
+    PROJECT_ACCOUNT_COL_INDEX = 5
+            
+    def __init__(self, baseurl, username, ask_password):
         self.baseurl = baseurl
-        self.flexhrm_customer_id = str(flexhrm_customer_id)
         self.username = username
         self.ask_password = ask_password
         self.password = None
@@ -50,12 +69,15 @@ class Session:
     def is_logged_in(self):
         resp = self.session.get(f'{self.baseurl}/HRM/')
         logged_in = 'HRM/Home?f=' in resp.url
+        bs = bs4.BeautifulSoup(resp.content, 'html.parser')
         if logged_in:
             self.company_id = resp.url.split('?f=')[1]
 
-            bs = bs4.BeautifulSoup(resp.content, 'html.parser')
             self.employee_id = bs.select_one('input#MyCalendarAnstallningId')['value']
-        return logged_in
+            return True, None
+        else:
+            flexhrm_customer_id = bs.select_one('input#Kundinstans')['value']
+            return False, flexhrm_customer_id
 
 
     # ASP.NET cross-post protection. The token is kept in the browser's
@@ -85,7 +107,8 @@ class Session:
             raise
 
     def log_in(self):
-        if self.is_logged_in():
+        logged_in, flexhrm_customer_id = self.is_logged_in()
+        if logged_in:
             #print("Already logged in")
             return
         if not self.password:
@@ -97,7 +120,7 @@ class Session:
         # Log in
         resp = self.session.post(f'{self.baseurl}/HRM/Login/LogOn',
                                  {
-                                     'Kundinstans': self.flexhrm_customer_id,
+                                     'Kundinstans': flexhrm_customer_id,
                                      'Anvandarnamn': self.username,
                                      'Losenord': self.password,
                                      'X-Requested-With': 'XMLHttpRequest'
@@ -156,7 +179,7 @@ class Session:
         # Every loaded HTML page requests the token (via Javascript/jQuery)?
         self.get_request_token(ref=home_resp.url)
         
-    def set_hours(self, project_id, activity_id, date, hours, row_id):
+    def set_day(self, date, flexhrm_entries):
         # TODO: Allow setting of multiple rows
         # Get initial form values
         hyphen_date = date.strftime("%Y-%m-%d")
@@ -169,12 +192,107 @@ class Session:
 
         # Must refresh the token every time after loading this (all?) page(s)?
         self.get_request_token(ref=resp.url)
-        
+
         bs = bs4.BeautifulSoup(resp.content, 'html.parser')
         form = bs.select_one('form#edit')
-        form_fields = form.select('[name]')
+
+        fields = self._parse_form_fields(form)
+
+        #self.session.cookies.set('anstallningId', self.employee_id, domain=get from baseurl, path='/HRM/')
+
+        lock_path = form.get('lock-action')
+        
+        fields['ModelDirty'] = str(int(time.time() * 1000))
+
+        # Can we skip this?
+        resp = self.session.post(f'{self.baseurl}{lock_path}',
+                                 data=fields,
+                                 headers={
+                                     '__RequestVerificationToken': self.token,
+                                     'X-Requested-With': 'XMLHttpRequest',
+                                     'Referer': dag_resp.url
+                                 })
+
+        #fields['ModelHasLock'] = '1'
+        self.token = resp.headers['AntiforgeryToken']
+
+        # Fill up with the number of rows we need (could probably skip one)
+        for _ in flexhrm_entries:
+            self._get_new_row(fields, date)
+
+        row_ids = fields['Tidrapportdag.Tidrader.Index']
+        if not isinstance(row_ids, list):
+            row_ids = [row_ids]
+
+        for row_id, entry in zip(row_ids, flexhrm_entries):
+            begin_str = entry.begin_time.strftime('%H:%M')
+            fields[f'Tidrapportdag.Tidrader[{row_id}].FromKlockslag.Value'] = begin_str
+            fields[f'Tidrapportdag.Tidrader[{row_id}].FromKlockslag.Changed'] = 'true'
+            end_str = entry.end_time.strftime('%H:%M')
+            fields[f'Tidrapportdag.Tidrader[{row_id}].TomKlockslag.Value'] = end_str
+            fields[f'Tidrapportdag.Tidrader[{row_id}].TomKlockslag.Changed'] = 'true'
+            fields[f'Tidrapportdag.Tidrader[{row_id}].NewRow'] = 'True'
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Id'] = 'f8ce42e2-1c4f-48cc-8f01-a58f00d49dce'
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Changed'] = 'True'
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Kodtyp'] = '1'
+
+            fields[f'Tidrapportdag.Tidrader[{row_id}].HarManuelltAndradeKonteringar'] = 'True'
+
+            consultancy_company_id, project_id = entry.account['flexhrm']
+            
+            # "Konteringar" (accounting???)
+            account_col_ids = fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar.Index']
+
+            #if company:
+            company_col_id = account_col_ids[self.COMPANY_ACCOUNT_COL_INDEX]
+
+            #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.EntityDescription'] = ''
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.Id'] = consultancy_company_id
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Changed'] = 'True'
+            # This GUID is fetched as part of creating the row
+            #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.ForetagKonteringsdimensionId'] = ''
+
+            project_col_id = account_col_ids[self.PROJECT_ACCOUNT_COL_INDEX]
+            #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.EntityDescription'] = ''
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.Id'] = project_id
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Changed'] = 'True'
+            # This GUID is fetched as part of creating the row
+            #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.ForetagKonteringsdimensionId'] = ''
+
+            us_date_midnight = date.strftime("%m%%2F%d%%2F%Y") + "%2000%3A00%3A00"
+        url = f'{self.baseurl}/HRM/Tid/Dagredovisning/Save?anstallningId={self.employee_id}&datum={us_date_midnight}&f={self.company_id}'
+
+        fields['ModelDirty'] = str(int(time.time() * 1000))
+        fields['_RequestVerificationToken'] = self.token
+        resp = self.session.post(url,
+                                 data=fields,
+                                 headers={ 'Referer': dag_resp.url,
+                                 })
+
+        try:
+            # We should be sent on to Dagredovisning
+            # If we stay on Save, we have done something wrong
+            self.token = resp.history[0].headers['AntiforgeryToken']
+        except Exception as e:
+            print(repr(e))
+            for r in resp.history:
+                print(r)
+                print(r.url)
+            print(resp)
+            print(resp.url)
+            print(resp.headers)
+            #print(resp.content)
+
+        # "Save" redirects to "Dagredovisning", so we need to get a new token
+        self.get_request_token(ref=resp.url)
+        
+        assert resp.status_code == 200
+
+    def _parse_form_fields(self, html_form, fields=None):
+        form_fields = html_form.select('[name]')
         # <select> and <textarea> does not have a "value" attribute
-        fields = {}
+        if fields is None:
+            fields = {}
         for form_field in form_fields:
             if form_field.name == 'input':
                 if form_field['type'] == 'image':
@@ -197,60 +315,69 @@ class Session:
                     fields[name] = [prev_value, value]
             else:
                 fields[name] = value
-
-        row_indices = fields['Tidrapportdag.Tidrader.Index']
-        row_index = row_indices[0]
-
-        #self.session.cookies.set('anstallningId', self.employee_id, domain=get from baseurl, path='/HRM/')
-
-        lock_path = form.get('lock-action')
+        return fields
         
-        fields['ModelDirty'] = str(int(time.time() * 1000))
+    def _get_new_row(self, fields, date):
+        # We could probably make up the row ID ourselves, but in this
+        # way we don't need to know the names of all the 101(!) fields.
+        hyphen_date = date.strftime("%Y-%m-%d")
+        resp = self.session.post(f'{self.baseurl}/HRM/Tid/Dagredovisning/EmptyBodyRow',
+                                 data = {
+                                     'AnstallningId': self.employee_id,
+                                     'Datum': hyphen_date
+                                 },
+                                 params = {
+                                     'f': self.company_id
+                                 },
+                                 headers = {
+                                     '__RequestVerificationToken': self.token
+                                 }
+        )
+
+        bs = bs4.BeautifulSoup(resp.content, 'html.parser')
+        row_div = bs.select_one('div.row')
+        self._parse_form_fields(row_div, fields)
         
-        resp = self.session.post(f'{self.baseurl}{lock_path}',
-                                 data=fields,
-                                 headers={
-                                     '__RequestVerificationToken': self.token,
-                                     'X-Requested-With': 'XMLHttpRequest',
-                                     'Referer': dag_resp.url
-                                 })
+    def find_project(self, name_substring):
+        # page='AutoComplete' works here as well
+        return self._auto_complete('AutoCompleteProjektByDeltagare', self.PROJECT_ACCOUNT_COL_INDEX,
+                                   name_substring)
 
-        #fields['ModelHasLock'] = '1'
-        self.token = resp.headers['AntiforgeryToken']
+    def find_company(self, name_substring):
+        return self._auto_complete('AutoComplete', self.COMPANY_ACCOUNT_COL_INDEX,
+                                   name_substring)
 
+    def _auto_complete(self, page, col_index, name_substring, limit=15):
+        # We need the "dimension" GUID
+        fields = {}
+        self._get_new_row(fields, datetime.date.today())
 
-        ###fields[f'Tidrapportdag.Tidrader[{row_index}].Tidkod.Change'] = 'True'
-        #fields[f'Tidrapportdag.Tidrader[{row_index}].FromKlockslag.Value'] = '02:07'
-        #fields[f'Tidrapportdag.Tidrader[{row_index}].FromKlockslag.Changed'] = 'true'
-        #fields[f'Tidrapportdag.Tidrader[{row_index}].TomKlockslag.Value'] = '06:00'
-        #fields[f'Tidrapportdag.Tidrader[{row_index}].TomKlockslag.Changed'] = 'true'
+        row_id = fields['Tidrapportdag.Tidrader.Index']
+        account_col_ids = fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar.Index']
+        col_id = account_col_ids[col_index]
 
-        
-        us_date_midnight = date.strftime("%m%%2F%d%%2F%Y") + "%2000%3A00%3A00"
-        url = f'{self.baseurl}/HRM/Tid/Dagredovisning/Save?anstallningId={self.employee_id}&datum={us_date_midnight}&f={self.company_id}'
+        dimension_id = fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{col_id}].Value.ForetagKonteringsdimensionId']
 
-        fields['ModelDirty'] = str(int(time.time() * 1000))
-        fields['_RequestVerificationToken'] = self.token
-        resp = self.session.post(url,
-                                 data=fields,
-                                 headers={ 'Referer': dag_resp.url,
-                                 })
-
-        self.token = resp.history[0].headers['AntiforgeryToken']
-
-        # "Save" redirects to "Dagredovisning", so we need to get a new token
-        self.get_request_token(ref=resp.url)
-        
-        assert resp.status_code == 200
-
-    def get_projects(self):
-        '''
-        Returns a list of projects
-        '''
-        pass
-
-    def get_activities(self):
-        '''
-        Returns a list of activities
-        '''
-        pass
+        us_date_midnight = datetime.date.today().strftime("%m%%2F%d%%2F%Y") + "%2000%3A00%3A00"
+        resp = self.session.post(f'{self.baseurl}/HRM/Kontering/{dimension_id}/{page}',
+                         data={
+                             'term': name_substring,
+                             'limit': str(limit),
+                             'valueType': 'EntityDescription',
+                             'validStatuses[]': '0',
+                             'dimensionId': dimension_id,
+                             'restrictByAnstallning': 'true',
+                             'includeContainers': 'false',
+                             'showSenasteProjektTid': 'true',
+                             'anstallningId': self.employee_id,
+                             #'linkedKonteringar[0][ForetagKonteringsdimensionId]': '',
+                             #'linkedKonteringar[0][Kod]': ''
+                         },
+                         headers={
+                             '__RequestVerificationToken': self.token,
+                             'X-Requested-With': 'XMLHttpRequest',
+                             'Referer': f'{self.baseurl}/HRM/Tid/Dagredovisning/Save?anstallningId={self.employee_id}&datum={us_date_midnight}&f={self.company_id}'
+                         }
+        )
+        resp_json = json.loads(resp.content)
+        return [(match['label'], match['id']) for match in resp_json]
