@@ -15,11 +15,15 @@
 # You should have received a copy of the GNU General Public License
 # along with time-reporting.  If not, see <https://www.gnu.org/licenses/>.
 
+import bs4
 import datetime
 import requests
 import pickle
 import time
 import json
+
+import htmlutils
+import timereporting
 
 COOKIE_FILE = 'millnet_cookies.pickle'
 
@@ -75,85 +79,124 @@ class Session:
         if not json_resp['success']:
             raise Exception("Failed to log in to Millnet: " + json_resp['errors'])
 
-    def set_hours(self, project_id, activity_id, date, hours, row_id):
+    def set_day(self, date, entries):
         '''
-        Set the hours for the given project, activity and row.
+        Set the entries for the given day. Hours are summed up.
+        '''
 
-        If row_id is None, a new row will be created!
-        '''
         number_date = date.strftime("%Y%m%d")
         hyphen_date = date.strftime("%Y-%m-%d")
-        # It is possible to update multiple lines by incrementing the _0
-        # suffix for each change
-        data = {
-                                "dirty_0": "1",
-                                "rt_0": str(hours),
-    #	                    "rt_0_org": "4.00",
-    #	                    "note_0": "",
-    #	                    "note_0_org": "",
-                                "pid_0": project_id,
-                                "aid_0": activity_id,
-    #	                    "aname_0": "Kompetensutveckling",
-                                "atype_0": "(null)",
-                                "absencetype_0": "(null)",
-                                "requirenote_0": "0",
-    #	                    "pha_0": "Default",
-    #	                    "phasename_0": "",
-    ##	                    "ro_0": "2.000000", # required. What does it mean?
-                                "regday_0": number_date, # today?
-                                "regday_0_org": number_date, # required
-    ##	                    "lck_0": "false", # lock?
-    ###	                    "lck_0_org": "false",
-                                # "edOverTime1_20210401": "",
-                                # "edOverTime1_20210401_org": "",
-                                # "edOverTime2_20210401": "",
-                                # "edOverTime2_20210401": "",
-                                # "edOverTime2_20210401_org": "",
-                                # "moveto_ro": "",
-                                # "moveto_pid": "",
-                                # "moveto_ppa": "",
-                                # "moveto_aid": "",
-                                # "moveto_pha": "",
-                                # "moveto_new_date": "",
-                                # "moveto_date_org": "",
-                                "periodtype": "D",
-                                "date": hyphen_date,
-                                "date_org": hyphen_date, # drop this?
-                                "date_begin": number_date,
-                                "date_end": number_date,
-                                "part": "save-time",
-                                "period_value": "",
-                                "period": number_date,
-                                "param1": "save",
-                                "param2": "",
-                                "param3": "",
-                                "param4": "",
-                                "param5": "",
-                                "param6": "",
-                                "param7": "",
-                                "project_id": "",
-                                "submenu": "",
-                                "submenu_prev": "",
-                                "orderby_name": "",
-                                "orderby_order": "0",
-                                "context": "",
-                                "module": ""
-                            }
-        #if new_row or:
-        data.update({
-            "pha_0": "Default",
-            "rt_0_org": ""
-        })
-        if row_id:
-            data.update({
-                ## Without these, a new line of the same type is added
-                # Seems to be ID of the row in the current sheet. Increments by 2.0 for each created row.
-                "ro_0": row_id, # "2.000000", # required.
 
-                "lck_0": "false", # lock?
-    #            "lck_0_org": "false",
-            })
+        sums = timereporting.sum_entries(entries, 'millnet')
+
+        resp = self.session.post(f"{self.baseurl}/cgi/milltime.cgi/main",
+                                 data={
+                                     'period': number_date,
+                                     'periodtype': 'D' # day
+                                     # date_* values says what date was last visited
+                                 })
+
+        # ro_<number> is not present until there is a value in the row
+        # Not that the numbers can skip, if there is an empty row between
+        # filled rows.
+        bs = bs4.BeautifulSoup(resp.content, 'html.parser')
+        form = bs.select_one('form#mt_main_form')
+        # We might be picking up more fields than we want to send..
+        fields = htmlutils.parse_form_fields(form)
+
+        existing_rows = {}
+        # It seems that Millnet starts the IDs at 2, so we mark 0 as taken
+        max_taken_id = 0
+        max_taken_index = -1
+        for name, value in fields.items():
+            if name.startswith('pid_'):
+                project_id = value
+                index = int(name.split('_')[1])
+                activity_id = fields[f'aid_{index}']
+                account = (project_id, activity_id)
+                existing_rows[account] = index
+                if index > max_taken_index:
+                    max_taken_index = index
+            elif name.startswith('ro_'):
+                unique_id = round(float(value))
+                if unique_id > max_taken_id:
+                    max_taken_id = unique_id
+        next_free_id = max_taken_id + 2
+        next_free_index = max_taken_index + 1
+
+        # TODO: Remove any already existing rows?
+
+        data = {}
+        for account, hours in sums.items():
+            index = existing_rows.get(account, None)
+            if index is None:
+                # New row
+                index = next_free_index
+                next_free_index += 1
+            project_id, activity_id = account
+            row_fields = {
+                f'dirty_{index}': '1',
+                f'rt_{index}': str(hours),
+                f'pid_{index}': project_id,
+                f'aid_{index}': activity_id,
+                f'regday_{index}': number_date, # today?
+                f'regday_{index}_org': number_date, # required
+                # lck not required for new rows
+                f'lck_{index}': 'false',
+                f'pha_{index}': 'Default',
+                f'rt_{index}_org': '',
+
+                #f'atype_{index}': '(null)',
+                # Absencetype seems to get populated correctly, even though
+                # we don't send it.
+                #f'absencetype_{index}': '(null)',
+                #f'requirenote_{index}': '0',
+            }
+            row_id = fields.get(f'ro_{index}', None)
+            if row_id:
+                #do not set ro_* for new rows. keep value for existing rows
+                row_fields[f'ro_{index}'] = row_id
+            #do not set ro_* for new rows. keep value for existing rows
+            data.update(row_fields)
+
+        data.update({
+            # 'edOverTime1_20210401': '',
+            # 'edOverTime1_20210401_org': '',
+            # 'edOverTime2_20210401': '',
+            # 'edOverTime2_20210401': '',
+            # 'edOverTime2_20210401_org': '',
+            # 'moveto_ro': '',
+            # 'moveto_pid': '',
+            # 'moveto_ppa': '',
+            # 'moveto_aid': '',
+            # 'moveto_pha': '',
+            # 'moveto_new_date': '',
+            # 'moveto_date_org': '',
+            'periodtype': 'D',
+            'date': hyphen_date,
+            'date_org': hyphen_date, # drop this?
+            'date_begin': number_date,
+            'date_end': number_date,
+            'part': 'save-time',
+            'period_value': '',
+            'period': '',#number_date,
+            'param1': 'save',
+            'param2': '',
+            'param3': '',
+            'param4': '',
+            'param5': '',
+            'param6': '',
+            'param7': '',
+            'project_id': '',
+            'submenu': '',
+            'submenu_prev': '',
+            'orderby_name': '',
+            'orderby_order': '0',
+            'context': '',
+        })
+        
         resp = self.session.post(f"{self.baseurl}/cgi/milltime.cgi/main", data)
+        
         assert resp.status_code == 200
 
     def get_projects(self, limit=50):

@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with time-reporting.  If not, see <https://www.gnu.org/licenses/>.
 
+from collections import defaultdict
 import datetime
 
 class Day:
@@ -48,3 +49,13 @@ class Entry:
                                 self.end_time,
                                 self.account,
                                 self.comment)
+
+# One might not report all ours in one system when doing e.g. consulting
+# In those cases, the account value is None
+def sum_entries(entries, for_system):
+    sums = defaultdict(datetime.timedelta)
+    for entry in entries:
+        account = entry.account[for_system]
+        if account:
+            sums[entry.account[for_system]] += datetime.datetime.combine(datetime.date.min, entry.end_time) - datetime.datetime.combine(datetime.date.min, entry.begin_time)
+    return sums

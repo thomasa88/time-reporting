@@ -159,9 +159,7 @@ def run_millnet_report(args, arg_parser):
 
     with millnet.Session(config.millnet_baseurl, config.millnet_username,
                          config.millnet_ask_password) as m:
-        millnet_activity_table = fetch_millnet_user_activities(m)
-
-        millnet_days = []
+        days = []
         one_day = datetime.timedelta(days=1)
         current_date = begin_date
         # Collect all data before reporting, to be sure that the mapping succeeds
@@ -169,27 +167,19 @@ def run_millnet_report(args, arg_parser):
         tr = timerec.TimeRecording(config.timerec_db_filename)
         while current_date <= end_date:
             entries = tr.get_day(current_date)
-            millnet_day = convert_day_from_timerec_to_millnet(day_report, millnet_activity_table)
-            millnet_days.append((current_date, millnet_day))
-            # for ((project_id, activity_id), hours) in millnet_day.items():
-            #    logger.info(project_id, activity_id, hours)
+            millnet_entries = [e for e in entries
+                               if convert_entry(e, 'timerec', 'millnet')]
+            if millnet_entries:
+                days.append((current_date, millnet_entries))
             current_date += one_day
 
         logger.info("Reporting...")
         if args.dry_run:
             logger.info("DRY RUN")
-        for date, millnet_day in millnet_days:
-            day_hours = datetime.timedelta()
-            logger.info(date, end=': ')
-            for ((project_id, activity_id), hours) in millnet_day.items():
-                if not args.dry_run:
-                    m.set_hours(project_id, activity_id, date,
-                                hours, row_id=None)
-                day_hours += hours
-            if day_hours:
-                logger.info(day_hours)
-            else:
-                logger.info("-")
+        for date, entries in days:
+            logger.info(date)
+            if not args.dry_run:
+                m.set_day(date, entries)
         logger.info("Done")
 
 def run_millnet_dump(args, arg_parser):
@@ -197,19 +187,19 @@ def run_millnet_dump(args, arg_parser):
                          config.millnet_username,
                          config.millnet_ask_password) as m:
         for row in fetch_millnet_user_activities(m):
-            logger.info((row[1], row[3]))
+            print((row[1], row[0], row[3], row[2]))
 
 def run_flexhrm_find_project(args, arg_parser):
     with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
                          config.flexhrm_ask_password) as flex:
         for label, guid in flex.find_project(args.name):
-            logger.info(guid, label)
+            print(guid, label)
 
 def run_flexhrm_find_company(args, arg_parser):
     with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
                          config.flexhrm_ask_password) as flex:
         for label, guid in flex.find_company(args.name):
-            logger.info(guid, label)
+            print(guid, label)
 
 def run_flexhrm_report(args, arg_parser):
     begin_date, end_date = parse_report_range(args.range)
@@ -242,6 +232,11 @@ def run_flexhrm_report(args, arg_parser):
         logger.info("Done")
 
 def convert_entry(entry, from_system, to_system):
+    '''
+    Add information for another accounting system.
+
+    Returns True if the entry should be counted in the to_system.
+    '''
     index = config.account_mapping[from_system].index(entry.account[from_system])
     value = config.account_mapping[to_system][index]
     entry.account[to_system] = value
