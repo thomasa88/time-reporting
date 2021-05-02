@@ -1,13 +1,36 @@
 import getpass
 
-username='myname@mycompany.com'
-def ask_password():
-    return getpass.getpass(f'Millnet password for {username}: ')
-baseurl='https://mycompany.millnet.cloud'
 google_fileid="Ab10ehEUGHABTUIGITna"
 timerec_db_filename="timerec-pro.db"
 
-# Use the "dump-tasks" command to find the available Millnet activities
-activity_mapping = { ('Customer', 'Project'): ('Project', 'Activity'),
-                     ('A', 'B'): ('C', 'D'),
-                     }
+millnet_username='myname@mycompany.com'
+def ask_password():
+    return getpass.getpass(f'Millnet password for {millnet_username}: ')
+baseurl='https://mycompany.millnet.cloud'
+
+flexhrm_username='123myname'
+def flexhrm_ask_password():
+    return getpass.getpass(f'FlexHRM password for {flexhrm_username}: ')
+flexhrm_baseurl='https://flexhrm.domain.se'
+
+flexhrm_consultancy_company = '00000000-0000-0000-0000-000000000000'
+account_mapping = {
+    'timerec': [
+        ('Customer Co', 'Project A'),
+        ('Customer Co', 'Project B'),
+        ('Consultant Company', 'Interntid'),
+        ('', 'Sjuk'),
+    ],
+    'millnet': [
+        ('Customer Co TA', 'Konsulttid'),
+        ('Customer Co TA', 'Konsulttid'),
+        ('Interntid', 'Interntid'),
+        ('Frånvaro', 'Sjuk'),
+    ],
+    'flexhrm': [
+        (flexhrm_consultancy_company, '00000000-0000-0000-0000-000000000000'),
+        (flexhrm_consultancy_company, '00000000-0000-0000-0000-000000000000'),
+        None,
+        None
+    ],
+}

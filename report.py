@@ -4,12 +4,12 @@
 #
 # Copyright (C) 2021  Thomas Axelsson
 #
-# VerticalTimeline is free software: you can redistribute it and/or modify
+# time-reporting is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
-# VerticalTimeline is distributed in the hope that it will be useful,
+# time-reporting is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
@@ -23,6 +23,7 @@ from collections import defaultdict
 import datetime
 import gzip
 import sys
+import logging
 
 import config
 import googledrive
@@ -30,24 +31,38 @@ import timerec
 import millnet
 import flexhrm
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('report')
+stdout_handler = logging.StreamHandler(sys.stdout)
+#logger.addHandler(stdout_handler)
+#logger.setLevel(logging.INFO)
+
 def parse_args():
     arg_parser = argparse.ArgumentParser()
-    arg_subparsers = arg_parser.add_subparsers(dest='command', required=True)
+    arg_subparsers = arg_parser.add_subparsers(dest='module', required=True)
 
-    parser_dump = arg_subparsers.add_parser('dump-tasks')
-    parser_dump.set_defaults(func=run_dump)
-
-    parser_report = arg_subparsers.add_parser('report')
-    parser_report.add_argument('-D', '--no-dl', action='store_true',
-                               help="Don't download the Time Recording database (use cached)")
-    parser_report.add_argument('-n', '--dry-run', action='store_true',
+    parser_millnet = arg_subparsers.add_parser('millnet')
+    millnet_subparsers = parser_millnet.add_subparsers(dest='command',
+                                                       required=True)
+    
+    parser_millnet_report = millnet_subparsers.add_parser('report')
+    parser_millnet_report.add_argument('-n', '--dry-run', action='store_true',
                                help="Don't upload hours to Millnet")
-    parser_report.add_argument('range',
+    parser_millnet_report.add_argument('range',
                                help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
-    parser_report.set_defaults(func=run_report)
+    parser_millnet_report.set_defaults(func=run_millnet_report)
+
+    parser_millnet_dump = millnet_subparsers.add_parser('dump-tasks')
+    parser_millnet_dump.set_defaults(func=run_millnet_dump)
+
+    parser_timerec = arg_subparsers.add_parser('timerec')
+    timerec_subparsers = parser_timerec.add_subparsers(dest='command',
+                                                       required=True)
+    parser_timerec_fetch = timerec_subparsers.add_parser('fetch')
+    parser_timerec_fetch.set_defaults(func=run_timerec_fetch)
 
     parser_flexhrm = arg_subparsers.add_parser('flexhrm')
-    flexhrm_subparsers = parser_flexhrm.add_subparsers(dest='subcommand',
+    flexhrm_subparsers = parser_flexhrm.add_subparsers(dest='command',
                                                        required=True)
     parser_flexhrm_find_project = flexhrm_subparsers.add_parser('find-project')
     parser_flexhrm_find_project.set_defaults(func=run_flexhrm_find_project)
@@ -59,15 +74,18 @@ def parse_args():
 
     parser_flexhrm_report = flexhrm_subparsers.add_parser('report')
     parser_flexhrm_report.set_defaults(func=run_flexhrm_report)
-    parser_flexhrm_report.add_argument('-D', '--no-dl', action='store_true',
-                                       help="Don't download the Time Recording database (use cached)")
     parser_flexhrm_report.add_argument('-n', '--dry-run', action='store_true',
-                                       help="Don't upload hours to Millnet")
+                                       help="Don't upload hours to FlexHRM")
     parser_flexhrm_report.add_argument('range',
                                        help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
 
     args = arg_parser.parse_args()
     args.func(args, arg_parser)
+
+def run_timerec_fetch(args, arg_parser):
+    logger.info("Downloading Time Recording database...")
+    download_timerec_db()
+    logger.info("Done")
 
 def download_timerec_db():
     temp_db_filename = 'timerec_temp.gz'
@@ -134,74 +152,69 @@ def parse_report_range(range_str):
         end_date = begin_date
     return begin_date, end_date
 
-def run_report(args, arg_parser):
+def run_millnet_report(args, arg_parser):
     begin_date, end_date = parse_report_range(args.range)
 
-    print(f"Date range: {begin_date} - {end_date}")
+    logger.info(f"Date range: {begin_date} - {end_date}")
 
-    if not args.no_dl:
-        print("Downloading latest Time Recording database...")
-        download_timerec_db()
-
-    with millnet.Session(config.baseurl, config.username, config.ask_password) as m:
+    with millnet.Session(config.millnet_baseurl, config.millnet_username,
+                         config.millnet_ask_password) as m:
         millnet_activity_table = fetch_millnet_user_activities(m)
 
         millnet_days = []
         one_day = datetime.timedelta(days=1)
         current_date = begin_date
         # Collect all data before reporting, to be sure that the mapping succeeds
-        print("Collecting...")
+        logger.info("Collecting...")
+        tr = timerec.TimeRecording(config.timerec_db_filename)
         while current_date <= end_date:
-            tr = timerec.TimeRecording(config.timerec_db_filename)
-            day_report = tr.get_day(current_date)
+            entries = tr.get_day(current_date)
             millnet_day = convert_day_from_timerec_to_millnet(day_report, millnet_activity_table)
             millnet_days.append((current_date, millnet_day))
             # for ((project_id, activity_id), hours) in millnet_day.items():
-            #    print(project_id, activity_id, hours)
+            #    logger.info(project_id, activity_id, hours)
             current_date += one_day
 
-        print("Reporting...")
+        logger.info("Reporting...")
         if args.dry_run:
-            print("DRY RUN")
+            logger.info("DRY RUN")
         for date, millnet_day in millnet_days:
             day_hours = datetime.timedelta()
-            print(date, end=': ')
+            logger.info(date, end=': ')
             for ((project_id, activity_id), hours) in millnet_day.items():
                 if not args.dry_run:
                     m.set_hours(project_id, activity_id, date,
                                 hours, row_id=None)
                 day_hours += hours
             if day_hours:
-                print(day_hours)
+                logger.info(day_hours)
             else:
-                print("-")
-        print("Done")
+                logger.info("-")
+        logger.info("Done")
 
-def run_dump(args, arg_parser):
-    with millnet.Session(config.baseurl, config.username, config.ask_password) as m:
+def run_millnet_dump(args, arg_parser):
+    with millnet.Session(config.millnet_baseurl,
+                         config.millnet_username,
+                         config.millnet_ask_password) as m:
         for row in fetch_millnet_user_activities(m):
-            print((row[1], row[3]))
+            logger.info((row[1], row[3]))
 
 def run_flexhrm_find_project(args, arg_parser):
     with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
                          config.flexhrm_ask_password) as flex:
         for label, guid in flex.find_project(args.name):
-            print(guid, label)
+            logger.info(guid, label)
 
 def run_flexhrm_find_company(args, arg_parser):
     with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
                          config.flexhrm_ask_password) as flex:
         for label, guid in flex.find_company(args.name):
-            print(guid, label)
+            logger.info(guid, label)
 
 def run_flexhrm_report(args, arg_parser):
     begin_date, end_date = parse_report_range(args.range)
 
-    print(f"Date range: {begin_date} - {end_date}")
-
-    if not args.no_dl:
-        print("Downloading latest Time Recording database...")
-        download_timerec_db()
+    logger.info(f"Date range: {begin_date} - {end_date}")
 
     with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
                          config.flexhrm_ask_password) as flex:
@@ -209,28 +222,30 @@ def run_flexhrm_report(args, arg_parser):
         one_day = datetime.timedelta(days=1)
         current_date = begin_date
         # Collect all data before reporting, to be sure that the mapping succeeds
-        print("Collecting...")
+        logger.info("Collecting...")
+        tr = timerec.TimeRecording(config.timerec_db_filename)
         while current_date <= end_date:
-            tr = timerec.TimeRecording(config.timerec_db_filename)
-            day_entries = tr.get_day(current_date)
-            for entry in day_entries:
-                map_entry(entry, 'timerec', 'flexhrm')
-            days.append((current_date, day_entries))
+            entries = tr.get_day(current_date)
+            flexhrm_entries = [e for e in entries
+                               if convert_entry(e, 'timerec', 'flexhrm')]
+            if flexhrm_entries:
+                days.append((current_date, flexhrm_entries))
             current_date += one_day
-            print([str(d) for d in day_entries])
 
-        print("Reporting...")
+        logger.info("Reporting...")
         if args.dry_run:
-            print("DRY RUN")
+            logger.info("DRY RUN")
         for date, entries in days:
-            print(date)
+            logger.info(date)
             if not args.dry_run:
                 flex.set_day(date, entries)
-        print("Done")
+        logger.info("Done")
 
-def map_entry(entry, from_system, to_system):
+def convert_entry(entry, from_system, to_system):
     index = config.account_mapping[from_system].index(entry.account[from_system])
-    entry.account[to_system] = config.account_mapping[to_system][index]
+    value = config.account_mapping[to_system][index]
+    entry.account[to_system] = value
+    return value is not None
 
 def check_mappings():
     # TODO: Check that all mapping lists have equal length
