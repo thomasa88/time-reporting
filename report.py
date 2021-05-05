@@ -25,6 +25,7 @@ import gzip
 import sys
 import logging
 
+import timereporting
 import config
 import googledrive
 import timerec
@@ -219,6 +220,11 @@ def run_flexhrm_report(args, arg_parser):
             flexhrm_entries = [e for e in entries
                                if convert_entry(e, 'timerec', 'flexhrm')]
             if flexhrm_entries:
+                if config.detect_lunch:
+                    lunch = detect_lunch(flexhrm_entries)
+                    convert_entry(lunch, 'generic', 'flexhrm')
+                    # TODO: Define __lt__ and use bisect.insort() to keep entries sorted
+                    flexhrm_entries.append(lunch)
                 days.append((current_date, flexhrm_entries))
             current_date += one_day
 
@@ -231,6 +237,24 @@ def run_flexhrm_report(args, arg_parser):
                 flex.set_day(date, entries)
         logger.info("Done")
 
+def detect_lunch(entries):
+    # This function assumes that entries are sorted
+    min_begin = datetime.time(10, 30)
+    max_end = datetime.time(14, 00)
+    begin = min_begin
+    end = (datetime.datetime.combine(datetime.datetime.min, min_begin) + config.min_lunch_duration).time()
+    for entry in entries:
+        if entry.begin_time < begin and entry.end_time > end:
+            begin = entry.end_time
+            end = (datetime.datetime.combine(datetime.datetime.min, entry.end_time) + config.min_lunch_duration).time()
+    if end > max_end:
+        raise Exception('Failed to find lunch slot', entries)
+    lunch = timereporting.Entry()
+    lunch.begin_time = begin
+    lunch.end_time = end
+    lunch.account['generic'] = 'LUNCH'
+    return lunch
+        
 def convert_entry(entry, from_system, to_system):
     '''
     Add information for another accounting system.

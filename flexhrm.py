@@ -227,6 +227,8 @@ class Session:
             row_ids = [row_ids]
 
         for row_id, entry in zip(row_ids, flexhrm_entries):
+            time_code, consultancy_company_id, project_id = entry.account['flexhrm']
+
             begin_str = entry.begin_time.strftime('%H:%M')
             fields[f'Tidrapportdag.Tidrader[{row_id}].FromKlockslag.Value'] = begin_str
             fields[f'Tidrapportdag.Tidrader[{row_id}].FromKlockslag.Changed'] = 'true'
@@ -234,32 +236,30 @@ class Session:
             fields[f'Tidrapportdag.Tidrader[{row_id}].TomKlockslag.Value'] = end_str
             fields[f'Tidrapportdag.Tidrader[{row_id}].TomKlockslag.Changed'] = 'true'
             fields[f'Tidrapportdag.Tidrader[{row_id}].NewRow'] = 'True'
-            fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Id'] = 'f8ce42e2-1c4f-48cc-8f01-a58f00d49dce'
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Id'] = time_code
             fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Changed'] = 'True'
-            fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Kodtyp'] = '1'
+            #fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Kodtyp'] = '1'
 
             fields[f'Tidrapportdag.Tidrader[{row_id}].HarManuelltAndradeKonteringar'] = 'True'
-
-            consultancy_company_id, project_id = entry.account['flexhrm']
             
             # "Konteringar" (accounting???)
             account_col_ids = fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar.Index']
 
-            #if company:
-            company_col_id = account_col_ids[self.COMPANY_ACCOUNT_COL_INDEX]
+            if consultancy_company_id:
+                company_col_id = account_col_ids[self.COMPANY_ACCOUNT_COL_INDEX]
+                #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.EntityDescription'] = ''
+                fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.Id'] = consultancy_company_id
+                fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Changed'] = 'True'
+                # This GUID is fetched as part of creating the row
+                #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.ForetagKonteringsdimensionId'] = ''
 
-            #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.EntityDescription'] = ''
-            fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.Id'] = consultancy_company_id
-            fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Changed'] = 'True'
-            # This GUID is fetched as part of creating the row
-            #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{company_col_id}].Value.ForetagKonteringsdimensionId'] = ''
-
-            project_col_id = account_col_ids[self.PROJECT_ACCOUNT_COL_INDEX]
-            #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.EntityDescription'] = ''
-            fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.Id'] = project_id
-            fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Changed'] = 'True'
-            # This GUID is fetched as part of creating the row
-            #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.ForetagKonteringsdimensionId'] = ''
+            if project_id:
+                project_col_id = account_col_ids[self.PROJECT_ACCOUNT_COL_INDEX]
+                #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.EntityDescription'] = ''
+                fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.Id'] = project_id
+                fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Changed'] = 'True'
+                # This GUID is fetched as part of creating the row
+                #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.ForetagKonteringsdimensionId'] = ''
 
             us_date_midnight = date.strftime("%m%%2F%d%%2F%Y") + "%2000%3A00%3A00"
         url = f'{self.baseurl}/HRM/Tid/Dagredovisning/Save?anstallningId={self.employee_id}&datum={us_date_midnight}&f={self.company_id}'

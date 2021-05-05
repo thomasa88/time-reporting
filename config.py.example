@@ -1,4 +1,5 @@
 import getpass
+import timedelta
 
 google_fileid="Ab10ehEUGHABTUIGITna"
 timerec_db_filename="timerec-pro.db"
@@ -13,23 +14,45 @@ def flexhrm_ask_password():
     return getpass.getpass(f'FlexHRM password for {flexhrm_username}: ')
 flexhrm_baseurl='https://flexhrm.domain.se'
 
+# Set to None if not consulting
 flexhrm_consultancy_company = '00000000-0000-0000-0000-000000000000'
+
+# Set this when reporting should detect lunch breaks
+# (For when the input has no lunch information but the target system
+# needs them)
+detect_lunch = True
+min_lunch_duration = datetime.timedelta(minutes=30)
+
+#force_insert_lunch = True
+
 account_mapping = {
+    'generic': [
+        'LUNCH',
+        None,
+        None,
+        None,
+        None
+    ],
     'timerec': [
+        None
         ('Customer Co', 'Project A'),
         ('Customer Co', 'Project B'),
         ('Consultant Company', 'Interntid'),
         ('', 'Sjuk'),
     ],
     'millnet': [
+        None
         ('Customer Co TA', 'Konsulttid'),
         ('Customer Co TA', 'Konsulttid'),
         ('Interntid', 'Interntid'),
         ('Frånvaro', 'Sjuk'),
     ],
     'flexhrm': [
-        (flexhrm_consultancy_company, '00000000-0000-0000-0000-000000000000'),
-        (flexhrm_consultancy_company, '00000000-0000-0000-0000-000000000000'),
+        ('00000000-0000-0000-0000-000000000000', None, None),
+        ('00000000-0000-0000-0000-000000000000', flexhrm_consultancy_company,
+         '00000000-0000-0000-0000-000000000000'),
+        ('00000000-0000-0000-0000-000000000000', flexhrm_consultancy_company,
+         '00000000-0000-0000-0000-000000000000'),
         None,
         None
     ],
