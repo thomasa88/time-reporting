@@ -198,7 +198,7 @@ class Session:
         bs = bs4.BeautifulSoup(resp.content, 'html.parser')
         form = bs.select_one('form#edit')
 
-        fields = self._parse_form_fields(form)
+        fields = htmlutils.parse_form_fields(form)
 
         #self.session.cookies.set('anstallningId', self.employee_id, domain=get from baseurl, path='/HRM/')
 
