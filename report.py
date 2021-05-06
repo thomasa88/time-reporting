@@ -239,12 +239,14 @@ def run_flexhrm_report(args, arg_parser):
 
 def detect_lunch(entries):
     # This function assumes that entries are sorted
+    # TODO: Expand lunch to be longer than the minimum time
     min_begin = datetime.time(10, 30)
     max_end = datetime.time(14, 00)
     begin = min_begin
     end = (datetime.datetime.combine(datetime.datetime.min, min_begin) + config.min_lunch_duration).time()
     for entry in entries:
-        if entry.begin_time < begin and entry.end_time > end:
+        # Overlap check: https://stackoverflow.com/a/325964/106019
+        if entry.begin_time <= end and entry.end_time >= begin:
             begin = entry.end_time
             end = (datetime.datetime.combine(datetime.datetime.min, entry.end_time) + config.min_lunch_duration).time()
     if end > max_end:
