@@ -32,15 +32,18 @@ import timerec
 import millnet
 import flexhrm
 
-logging.basicConfig(level=logging.INFO)
+#logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('report')
-stdout_handler = logging.StreamHandler(sys.stdout)
+#stdout_handler = logging.StreamHandler(sys.stdout)
 #logger.addHandler(stdout_handler)
 #logger.setLevel(logging.INFO)
 
 def parse_args():
     arg_parser = argparse.ArgumentParser()
     arg_subparsers = arg_parser.add_subparsers(dest='module', required=True)
+
+    arg_parser.add_argument('-v', '--verbose', action='store_true',
+                            help='Verbose output')
 
     parser_millnet = arg_subparsers.add_parser('millnet')
     millnet_subparsers = parser_millnet.add_subparsers(dest='command',
@@ -81,6 +84,12 @@ def parse_args():
                                        help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
 
     args = arg_parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    
     args.func(args, arg_parser)
 
 def run_timerec_fetch(args, arg_parser):
