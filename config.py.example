@@ -48,11 +48,11 @@ account_mapping = {
         ('Frånvaro', 'Sjuk'),
     ],
     'flexhrm': [
-        ('00000000-0000-0000-0000-000000000000', None, None),
-        ('00000000-0000-0000-0000-000000000000', flexhrm_consultancy_company,
-         '00000000-0000-0000-0000-000000000000'),
-        ('00000000-0000-0000-0000-000000000000', flexhrm_consultancy_company,
-         '00000000-0000-0000-0000-000000000000'),
+        ('lunch', None, None),
+        ('arbete', flexhrm_consultancy_company,
+         'Projekt 1'),
+        ('arbete', flexhrm_consultancy_company,
+         'Projekt 2'),
         None,
         None
     ],

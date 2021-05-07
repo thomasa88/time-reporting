@@ -21,10 +21,14 @@ import pickle
 import time
 import json
 import bs4
+import html
+import logging
 
 import htmlutils
 
 COOKIE_FILE = 'flexhrm_cookies.pickle'
+
+logger = logging.getLogger(__name__)
 
 class Session:
     # Index is important. ForetagKonteringsdimensionId does not decide type.
@@ -39,11 +43,16 @@ class Session:
         self.password = None
         self.token = None
         self.company_id = None
+        self.time_code_cache = {}
+        self.project_cache = {}
+        self.company_cache = {}
+        
         self.session = requests.Session()
         # Need user-agent to not get redirected to InternalServerError page
         self.session.headers = {
             'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:87.0) Gecko/20100101 Firefox/87.0'
         }
+        
         self.load_cookies()
 
     def __enter__(self):
@@ -206,18 +215,6 @@ class Session:
         
         fields['ModelDirty'] = str(int(time.time() * 1000))
 
-        # Can we skip this?
-        resp = self.session.post(f'{self.baseurl}{lock_path}',
-                                 data=fields,
-                                 headers={
-                                     '__RequestVerificationToken': self.token,
-                                     'X-Requested-With': 'XMLHttpRequest',
-                                     'Referer': dag_resp.url
-                                 })
-
-        #fields['ModelHasLock'] = '1'
-        self.token = resp.headers['AntiforgeryToken']
-
         # Fill up with the number of rows we need (could probably skip one)
         for _ in flexhrm_entries:
             self._get_new_row(fields, date)
@@ -227,7 +224,7 @@ class Session:
             row_ids = [row_ids]
 
         for row_id, entry in zip(row_ids, flexhrm_entries):
-            time_code, consultancy_company_id, project_id = entry.account['flexhrm']
+            time_code_id, consultancy_company_id, project_id = self._account_to_ids(entry.account['flexhrm'], dagredovisning_bs=bs)
 
             begin_str = entry.begin_time.strftime('%H:%M')
             fields[f'Tidrapportdag.Tidrader[{row_id}].FromKlockslag.Value'] = begin_str
@@ -236,7 +233,7 @@ class Session:
             fields[f'Tidrapportdag.Tidrader[{row_id}].TomKlockslag.Value'] = end_str
             fields[f'Tidrapportdag.Tidrader[{row_id}].TomKlockslag.Changed'] = 'true'
             fields[f'Tidrapportdag.Tidrader[{row_id}].NewRow'] = 'True'
-            fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Id'] = time_code
+            fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Id'] = time_code_id
             fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Changed'] = 'True'
             #fields[f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.Kodtyp'] = '1'
 
@@ -261,13 +258,30 @@ class Session:
                 # This GUID is fetched as part of creating the row
                 #fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar[{project_col_id}].Value.ForetagKonteringsdimensionId'] = ''
 
-            us_date_midnight = date.strftime("%m%%2F%d%%2F%Y") + "%2000%3A00%3A00"
-        url = f'{self.baseurl}/HRM/Tid/Dagredovisning/Save?anstallningId={self.employee_id}&datum={us_date_midnight}&f={self.company_id}'
+        # Can we skip this?
+        resp = self.session.post(f'{self.baseurl}{lock_path}',
+                                 data=fields,
+                                 headers={
+                                     '__RequestVerificationToken': self.token,
+                                     'X-Requested-With': 'XMLHttpRequest',
+                                     'Referer': dag_resp.url
+                                 })
+
+        #fields['ModelHasLock'] = '1'
+        self.token = resp.headers['AntiforgeryToken']
+
+        us_date_midnight = date.strftime("%m%%2F%d%%2F%Y") + "%2000%3A00%3A00"
+        save_url = f'{self.baseurl}/HRM/Tid/Dagredovisning/Save'
 
         fields['ModelDirty'] = str(int(time.time() * 1000))
         fields['_RequestVerificationToken'] = self.token
-        resp = self.session.post(url,
+        resp = self.session.post(save_url,
                                  data=fields,
+                                 params={
+                                     'anstallningId': self.employee_id,
+                                     'datum': us_date_midnight,
+                                     'f': self.company_id
+                                 },
                                  headers={ 'Referer': dag_resp.url,
                                  })
 
@@ -289,8 +303,40 @@ class Session:
         self.get_request_token(ref=resp.url)
         
         assert resp.status_code == 200
+
+    def _account_to_ids(self, account, dagredovisning_bs):
+        time_code, consultancy_company, project = account
+
+        time_code_matches = self._find_time_code(time_code,
+                                                 dagredovisning_bs)
+        logger.debug('Find time code %s: %r', time_code, time_code_matches)
+        if len(time_code_matches) != 1:
+            raise Exception(f'Did not find exactly one match for time code: {time_code}')
+        time_code_id = time_code_matches[0][1]
+
+        if consultancy_company:
+            company_matches = self.find_company(consultancy_company,
+                                                dagredovisning_bs)
+            logger.debug('Find company %s: %r', consultancy_company, company_matches)
+            if len(company_matches) != 1:
+                raise Exception(f'Did not find exactly one match for company: {consultancy_company}')
+            consultancy_company_id = company_matches[0][1]
+        else:
+            consultancy_company_id = None
+
+        # E.g. "lunch" has no project
+        if project:
+            project_matches = self.find_project(project, dagredovisning_bs)
+            logger.debug('Find project %s: %r', project, project_matches)
+            if len(project_matches) != 1:
+                raise Exception(f'Did not find exactly one match for project: {project}')
+            project_id = project_matches[0][1]
+        else:
+            project_id = None
         
-    def _get_new_row(self, fields, date):
+        return (time_code_id, consultancy_company_id, project_id)
+        
+    def _get_new_row_raw(self, date):
         # We could probably make up the row ID ourselves, but in this
         # way we don't need to know the names of all the 101(!) fields.
         hyphen_date = date.strftime("%Y-%m-%d")
@@ -309,23 +355,92 @@ class Session:
 
         bs = bs4.BeautifulSoup(resp.content, 'html.parser')
         row_div = bs.select_one('div.row')
+        return row_div
+
+    def _get_new_row(self, fields, date):
+        row_div = self._get_new_row_raw(date)
         htmlutils.parse_form_fields(row_div, fields)
+
+    def _find_time_code(self, name_substring, dagredovisning_bs=None):
+        cached_value = self.time_code_cache.get(name_substring)
+        if cached_value:
+            logging.debug('Using cached time code value: %s', cached_value)
+            return cached_value
         
-    def find_project(self, name_substring):
+        # Find the first row ID (there will be at least one row)
+        row_id = dagredovisning_bs.find('input', {'name': 'Tidrapportdag.Tidrader.Index'}).get('value')
+
+        time_code_input = dagredovisning_bs.find('input', {'name': f'Tidrapportdag.Tidrader[{row_id}].Tidkod.Value.EntityDescription'})
+        time_code_enums_encoded = time_code_input.get('data-extraparams')
+        time_code_enums = json.loads(time_code_enums_encoded)
+
+        time_group_id = dagredovisning_bs.select_one('#Tidgrupp_Id').get('value')
+
+        limit = 15
+        data = {
+            'term': name_substring,
+            'limit': str(limit),
+            'valueType': 'EntityDescription',
+            'tidgruppId': time_group_id,
+        }
+        data.update(time_code_enums)
+
+        us_date_midnight = datetime.date.today().strftime("%m%%2F%d%%2F%Y") + "%2000%3A00%3A00"
+        resp = self.session.post(f'{self.baseurl}/HRM/Tid/TidredovisningTidkod/AutoComplete',
+                         data=data,
+                         headers={
+                             '__RequestVerificationToken': self.token,
+                             'X-Requested-With': 'XMLHttpRequest',
+                             'Referer': f'{self.baseurl}/HRM/Tid/Dagredovisning/Save?anstallningId={self.employee_id}&datum={us_date_midnight}&f={self.company_id}'
+                         }
+        )
+        resp_json = json.loads(resp.content)
+        matches = [(match['label'], match['id']) for match in resp_json]
+        self.time_code_cache[name_substring] = matches
+        return matches
+        
+    def find_project(self, name_substring, dagredovisning_bs=None):
+        cached_value = self.project_cache.get(name_substring)
+        if cached_value:
+            logging.debug('Using cached project value: %s', cached_value)
+            return cached_value
+
         # page='AutoComplete' works here as well
-        return self._auto_complete('AutoCompleteProjektByDeltagare', self.PROJECT_ACCOUNT_COL_INDEX,
-                                   name_substring)
+        matches = self._auto_complete('AutoCompleteProjektByDeltagare',
+                                      self.PROJECT_ACCOUNT_COL_INDEX,
+                                      name_substring,
+                                      dagredovisning_bs=dagredovisning_bs)
+        self.project_cache[name_substring] = matches
+        return matches
 
-    def find_company(self, name_substring):
-        return self._auto_complete('AutoComplete', self.COMPANY_ACCOUNT_COL_INDEX,
-                                   name_substring)
+    def find_company(self, name_substring, dagredovisning_bs=None):
+        cached_value = self.company_cache.get(name_substring)
+        if cached_value:
+            logging.debug('Using cached company value: %s', cached_value)
+            return cached_value
 
-    def _auto_complete(self, page, col_index, name_substring, limit=15):
+        matches = self._auto_complete('AutoComplete',
+                                      self.COMPANY_ACCOUNT_COL_INDEX,
+                                      name_substring,
+                                      dagredovisning_bs=dagredovisning_bs)
+        self.company_cache[name_substring] = matches
+        return matches
+
+    def _auto_complete(self, page, col_index, name_substring, limit=15,
+                       dagredovisning_bs=None):
         # We need the "dimension" GUID
         fields = {}
-        self._get_new_row(fields, datetime.date.today())
+        if dagredovisning_bs:
+            # Cached response
+            form = dagredovisning_bs.select_one('form#edit')
+            htmlutils.parse_form_fields(form, fields)
+        else:
+            # No cached response, grab a new row to get our data
+            self._get_new_row(fields, datetime.date.today())
 
         row_id = fields['Tidrapportdag.Tidrader.Index']
+        if isinstance(row_id, list):
+            row_id = row_id[0]
         account_col_ids = fields[f'Tidrapportdag.Tidrader[{row_id}].Konteringar.Index']
         col_id = account_col_ids[col_index]
 
