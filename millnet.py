@@ -21,11 +21,14 @@ import requests
 import pickle
 import time
 import json
+import logging
 
 import htmlutils
 import timereporting
 
 COOKIE_FILE = 'millnet_cookies.pickle'
+
+logger = logging.getLogger(__name__)
 
 class Session:
     def __init__(self, baseurl, username, ask_password):
@@ -33,6 +36,8 @@ class Session:
         self.username = username
         self.ask_password = ask_password
         self.password = None
+        self.project_list_cache = None
+        self.activity_list_cache = {}
         self.session = requests.Session()
         self.load_cookies()
 
@@ -113,8 +118,8 @@ class Session:
                 project_id = value
                 index = int(name.split('_')[1])
                 activity_id = fields[f'aid_{index}']
-                account = (project_id, activity_id)
-                existing_rows[account] = index
+                account_ids = (project_id, activity_id)
+                existing_rows[account_ids] = index
                 if index > max_taken_index:
                     max_taken_index = index
             elif name.startswith('ro_'):
@@ -128,12 +133,13 @@ class Session:
 
         data = {}
         for account, hours in sums.items():
-            index = existing_rows.get(account, None)
+            account_ids = self._account_to_ids(account)
+            project_id, activity_id = account_ids
+            index = existing_rows.get(account_ids, None)
             if index is None:
                 # New row
                 index = next_free_index
                 next_free_index += 1
-            project_id, activity_id = account
             row_fields = {
                 f'dirty_{index}': '1',
                 f'rt_{index}': str(hours),
@@ -194,11 +200,42 @@ class Session:
             'orderby_order': '0',
             'context': '',
         })
-        
+
+        for k,v in data.items():
+            print(f'"{k}": "{v}",')
+
         resp = self.session.post(f"{self.baseurl}/cgi/milltime.cgi/main", data)
         
         assert resp.status_code == 200
 
+    def _account_to_ids(self, account):
+        project, activity = account
+
+        if not self.project_list_cache:
+            self.project_list_cache = {p['value']: p['id']
+                                       for p in self.get_projects()}
+
+        try:
+            project_id = self.project_list_cache[project]
+        except KeyError:
+            raise Exception(f'Could not find project: {project}')
+
+        if project_id not in self.activity_list_cache:
+            self.activity_list_cache[project_id] = {a['Name']: a['ActivityId']
+                                                    for a in
+                                                    self.get_activities(project_id)}
+
+        activities = self.activity_list_cache[project_id]
+        try:
+            activity_id = activities[activity]
+        except KeyError:
+            raise Exception(f'Could not find activity "{activity}" for project "{project}"')
+
+        logger.debug('%s, %s -> %s, %s', project, activity, project_id, activity_id)
+
+        return project_id, activity_id
+        
+        
     def get_projects(self, limit=50):
         '''
         Returns a list of projects

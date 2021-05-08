@@ -104,25 +104,6 @@ def download_timerec_db():
         with open(config.timerec_db_filename, 'wb') as unpacked_file:
             unpacked_file.write(gzfile.read())
 
-def convert_day_from_timerec_to_millnet(sessions, millnet_activity_table):
-    sums = defaultdict(datetime.timedelta)
-    for session in sessions:
-        timerec_task = (session.customer, session.project)
-        try:
-            project, activity = config.activity_mapping[timerec_task]
-        except KeyError:
-            raise Exception(f"No mapping for {repr(timerec_task)}")
-        for row in millnet_activity_table:
-            if row[1] == project and row[3] == activity:
-                project_id = row[0]
-                activity_id = row[2]
-                break
-        else:
-            raise Exception("OUCH, No mapping for ", project, activity)
-        #project_id, activity_id, hours
-        sums[(project_id, activity_id)] += session.end - session.begin
-    return sums
-
 # Get a table of
 # project_id, project name, activity_id, activity name
 def fetch_millnet_user_activities(millnet_session):
