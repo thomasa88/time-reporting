@@ -101,45 +101,43 @@ class Session:
                                      # date_* values says what date was last visited
                                  })
 
-        # ro_<number> is not present until there is a value in the row
-        # Not that the numbers can skip, if there is an empty row between
-        # filled rows.
         bs = bs4.BeautifulSoup(resp.content, 'html.parser')
         form = bs.select_one('form#mt_main_form')
-        # We might be picking up more fields than we want to send..
         fields = htmlutils.parse_form_fields(form)
 
-        existing_rows = {}
+        # ro_<number> contains a row ID for existing rows that have values
         # It seems that Millnet starts the IDs at 2, so we mark 0 as taken
         max_taken_id = 0
-        max_taken_index = -1
+        row_ids = {}
         for name, value in fields.items():
-            if name.startswith('pid_'):
-                project_id = value
+            if name.startswith('ro_'):
+                unique_id = round(float(value))
                 index = int(name.split('_')[1])
+                project_id = fields[f'pid_{index}']
                 activity_id = fields[f'aid_{index}']
                 account_ids = (project_id, activity_id)
-                existing_rows[account_ids] = index
-                if index > max_taken_index:
-                    max_taken_index = index
-            elif name.startswith('ro_'):
-                unique_id = round(float(value))
+                # If the user has already created multiple rows for the
+                # same account, we just overwrite the value of the first
+                # one. That is, we don't really handle multiple rows for
+                # the same account.
+                if not account_ids in row_ids:
+                    row_ids[account_ids] = unique_id
                 if unique_id > max_taken_id:
                     max_taken_id = unique_id
         next_free_id = max_taken_id + 2
-        next_free_index = max_taken_index + 1
 
         # TODO: Remove any already existing rows?
 
+        # We pick up more form fields than we want to send,
+        # so set up a new dictionary for the post data
         data = {}
-        for account, hours in sums.items():
+        # Index is just counted up from 0 (the Javascript discards the indices
+        # of the input boxes)
+        for index, (account, sum_) in enumerate(sums.items()):
             account_ids = self._account_to_ids(account)
             project_id, activity_id = account_ids
-            index = existing_rows.get(account_ids, None)
-            if index is None:
-                # New row
-                index = next_free_index
-                next_free_index += 1
+            hours = sum_.total_seconds() / 3600
+            row_id = row_ids.get(account_ids, None)
             row_fields = {
                 f'dirty_{index}': '1',
                 f'rt_{index}': str(hours),
@@ -158,11 +156,9 @@ class Session:
                 #f'absencetype_{index}': '(null)',
                 #f'requirenote_{index}': '0',
             }
-            row_id = fields.get(f'ro_{index}', None)
             if row_id:
-                #do not set ro_* for new rows. keep value for existing rows
-                row_fields[f'ro_{index}'] = row_id
-            #do not set ro_* for new rows. keep value for existing rows
+                # Do not set ro_* for new rows. keep value for existing rows
+                row_fields[f'ro_{index}'] = f'{row_id}.000000'
             data.update(row_fields)
 
         data.update({
@@ -200,9 +196,6 @@ class Session:
             'orderby_order': '0',
             'context': '',
         })
-
-        for k,v in data.items():
-            print(f'"{k}": "{v}",')
 
         resp = self.session.post(f"{self.baseurl}/cgi/milltime.cgi/main", data)
         
