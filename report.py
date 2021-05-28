@@ -236,7 +236,7 @@ def detect_lunch(entries):
     end = (datetime.datetime.combine(datetime.datetime.min, min_begin) + config.min_lunch_duration).time()
     for entry in entries:
         # Overlap check: https://stackoverflow.com/a/325964/106019
-        if entry.begin_time <= end and entry.end_time >= begin:
+        if entry.begin_time < end and entry.end_time > begin:
             begin = entry.end_time
             end = (datetime.datetime.combine(datetime.datetime.min, entry.end_time) + config.min_lunch_duration).time()
     if end > max_end:

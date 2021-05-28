@@ -50,6 +50,10 @@ class Entry:
                                 self.account,
                                 self.comment)
 
+    def __repr__(self):
+        # Not fully accurate, but better than nothing
+        return str(self)
+
 # One might not report all ours in one system when doing e.g. consulting
 # In those cases, the account value is None
 def sum_entries(entries, for_system):
