@@ -31,6 +31,7 @@ import googledrive
 import timerec
 import millnet
 import flexhrm
+import xledger
 
 #logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('report')
@@ -82,6 +83,17 @@ def parse_args():
                                        help="Don't upload hours to FlexHRM")
     parser_flexhrm_report.add_argument('range',
                                        help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
+
+    parser_xledger = arg_subparsers.add_parser('xledger')
+    xledger_subparsers = parser_xledger.add_subparsers(dest='command',
+                                                       required=True)
+    
+    parser_xledger_report = xledger_subparsers.add_parser('report')
+    parser_xledger_report.add_argument('-n', '--dry-run', action='store_true',
+                               help="Don't upload hours to Xledger")
+    parser_xledger_report.add_argument('range',
+                               help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
+    parser_xledger_report.set_defaults(func=run_xledger_report)
 
     args = arg_parser.parse_args()
 
@@ -225,6 +237,37 @@ def run_flexhrm_report(args, arg_parser):
             logger.info(date)
             if not args.dry_run:
                 flex.set_day(date, entries)
+        logger.info("Done")
+
+def run_xledger_report(args, arg_parser):
+    begin_date, end_date = parse_report_range(args.range)
+
+    logger.info(f"Date range: {begin_date} - {end_date}")
+
+    with xledger.Session(config.xledger_baseurl, config.xledger_username,
+                         config.xledger_ask_password,
+                         config.xledger_pair_password) as x:
+        days = []
+        one_day = datetime.timedelta(days=1)
+        current_date = begin_date
+        # Collect all data before reporting, to be sure that the mapping succeeds
+        logger.info("Collecting...")
+        tr = timerec.TimeRecording(config.timerec_db_filename)
+        while current_date <= end_date:
+            entries = tr.get_day(current_date)
+            xledger_entries = [e for e in entries
+                               if convert_entry(e, 'timerec', 'xledger')]
+            if xledger_entries:
+                days.append((current_date, xledger_entries))
+            current_date += one_day
+
+        logger.info("Reporting...")
+        if args.dry_run:
+            logger.info("DRY RUN")
+        for date, entries in days:
+            logger.info(date)
+            if not args.dry_run:
+                x.set_day(date, entries)
         logger.info("Done")
 
 def detect_lunch(entries):

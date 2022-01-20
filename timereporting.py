@@ -54,9 +54,12 @@ class Entry:
         # Not fully accurate, but better than nothing
         return str(self)
 
-# One might not report all ours in one system when doing e.g. consulting
+# One might not report all hours in one system when doing e.g. consulting
 # In those cases, the account value is None
 def sum_entries(entries, for_system):
+    '''Sums the worked time for each account for the given accounting system.
+
+    The result is one sum entry for each account.'''
     sums = defaultdict(datetime.timedelta)
     for entry in entries:
         account = entry.account[for_system]

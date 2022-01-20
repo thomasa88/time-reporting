@@ -1,4 +1,5 @@
 def parse_form_fields(html_form, fields=None):
+    # All fields sent through POST has a "name" set
     form_fields = html_form.select('[name]')
     # <select> and <textarea> does not have a "value" attribute
     if fields is None:
