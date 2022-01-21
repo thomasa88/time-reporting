@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 class Session:
     def __init__(self, baseurl, username, ask_password, device_password):
         self.baseurl = baseurl
-        #self.mbaseurl = baseurl.replace('www', 'm')
         self.username = username
         self.ask_password = ask_password
         self.password = None
@@ -42,15 +41,10 @@ class Session:
         self.device_password = device_password
         # Unique ID of the paired device
         self.device_key = None
-        
+
         self.project_list_cache = None
         self.activity_list_cache = {}
         self.session = requests.Session()
-
-        # Needed?
-        # self.session.headers = {
-        #     'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:87.0) Gecko/20100101 Firefox/87.0'
-        # }
 
         self.load_session_data()
 
@@ -90,28 +84,22 @@ class Session:
 
         # Using Device pairing to avoid the e-mail security code
         # on each login
-        #if not self.is_paired():
-        #    self.pair()
-        
-                    #print(resp.text)
-        if not self.log_in_req():
+        if not self._log_in_req():
             logger.info('Login failed. Try to pair.')
             self.pair()
-            if not self.log_in_req():
+            if not self._log_in_req():
                 raise Exception("Device log in failed: TODO")
 
         logger.debug('Login successful')
 
-    def log_in_req(self):
+    def _log_in_req(self):
         resp = self.session.get(f"{self.baseurl}")
-        
+
         # Load form to get ASP.Net fields
-        bs = bs4.BeautifulSoup(resp.content, 'html.parser')
-        form = bs.select_one('form#Default')
-        form_fields = htmlutils.parse_form_fields(form)
+        form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#Default')
         # We don't want all the fields, so build our own set
         fields = {
-	    "__EVENTTARGET": "",
+	        "__EVENTTARGET": "",
             "__EVENTARGUMENT": "",
             "__VIEWSTATE": "",
             "__EVENTVALIDATION": form_fields["__EVENTVALIDATION"],
@@ -133,11 +121,9 @@ class Session:
             self.password = self.ask_password()
 
         resp = self.session.get(f"{self.baseurl}")
-        
+
         # Load form to get ASP.Net fields
-        bs = bs4.BeautifulSoup(resp.content, 'html.parser')
-        form = bs.select_one('form#Default')
-        form_fields = htmlutils.parse_form_fields(form)
+        form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#Default')
         # We don't want all the fields, so build our own set
         # TODO: Just strip "btn" parameters?
         fields = {
@@ -165,10 +151,8 @@ class Session:
 
         # Security code entry
         sec_code = input('Security code: ')
-        
-        bs = bs4.BeautifulSoup(resp.content, 'html.parser')
-        form = bs.select_one('form#Default')
-        form_fields = htmlutils.parse_form_fields(form)
+
+        form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#Default')
         fields = {
             "__EVENTTARGET": "",
             "__EVENTARGUMENT": "",
@@ -189,9 +173,7 @@ class Session:
             raise Exception("Security code check failed: TODO")
 
         # Device password entry
-        bs = bs4.BeautifulSoup(resp.content, 'html.parser')
-        form = bs.select_one('form#Default')
-        form_fields = htmlutils.parse_form_fields(form)
+        form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#Default')
         fields = {
             "__EVENTTARGET": "",
             "__EVENTARGUMENT": "",
@@ -199,11 +181,11 @@ class Session:
             "__EVENTVALIDATION": form_fields["__EVENTVALIDATION"],
             "ucLogin$hfDeviceKey": "",
             "ucLogin$UtcOffset": "-60",
-	    "ucLogin$ucPairDevice$txtSDeviceName": "time-reporting",
-	    "ucLogin$ucPairDevice$txtSDevicePassword": self.device_password,
-	    "ucLogin$ucPairDevice$txtSConfirmDevicePassword": self.device_password,
+            "ucLogin$ucPairDevice$txtSDeviceName": "time-reporting",
+            "ucLogin$ucPairDevice$txtSDevicePassword": self.device_password,
+            "ucLogin$ucPairDevice$txtSConfirmDevicePassword": self.device_password,
             # TODO: Make this language-agnostic
-	    "ucLogin$ucPairDevice$pnlCustomButtons_0$B19052": "Registrera"
+	        "ucLogin$ucPairDevice$pnlCustomButtons_0$B19052": "Registrera"
         }
         resp = self.session.post(f"{self.baseurl}",
                                  fields,
@@ -218,7 +200,7 @@ class Session:
             raise Exception('Failed to get pairing device key')
 
         logging.info('Paired')
-        
+
     def set_day(self, date, entries):
         '''
         Set the entries for the given day. Hours are summed up.
@@ -238,19 +220,14 @@ class Session:
 
             activity_id = activity[0]
             activity_url_name = activity[1].replace(' ', '+')
-            
+
             # Mobile reporting page
             resp = self.session.get(f'{self.baseurl}/Restricted/TouchFrame.aspx?Mnu=2329&frm=3&src=2&sn=fb_ctl00_pnlButtonsTouch_G&v={java_timestamp}&pk=0&dk={hyphen_date}&pb=true&rf=false')
 
-            #print(resp.text)
-
-            bs = bs4.BeautifulSoup(resp.content, 'html.parser')
-            form = bs.select_one('form#frmTouchFrame')
-            form_fields = htmlutils.parse_form_fields(form)
+            form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#frmTouchFrame')
 
             # TODO: Don't use floats, to avoid potential decimal problems
             hours_str = str(hours).replace('.', ',')
-
 
             # Set the project
 
@@ -290,22 +267,15 @@ class Session:
                 **base_fields
             }
 
-            print(form_fields)
-
             # We must set the project before we can set an activity
             # (I guess the __PBT counter tracks the session?)
             resp = self.session.post(resp.url,
                                      data=fields_proj)
 
-            print(resp.content)
+            form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#frmTouchFrame')
 
-            bs = bs4.BeautifulSoup(resp.content, 'html.parser')
-            form = bs.select_one('form#frmTouchFrame')
-            form_fields = htmlutils.parse_form_fields(form)
+            # Set the activity and save
 
-
-            # Set the activity
-            
             fields = {
                 "__PBT75108-2329-3": form_fields["__PBT75108-2329-3"], # Request counter?
                 "__EVENTVALIDATION": form_fields["__EVENTVALIDATION"],
@@ -321,8 +291,9 @@ class Session:
                                      data=fields)
 
             assert resp.status_code == 200
-            
-            # TODO: check result!
+
+            if 'ReturnButtonZoom' not in resp.text:
+                raise Exception(f'Failed to save {project} {activity} for {date}')
 
     def _account_to_ids(self, account):
         project, activity = account
@@ -353,8 +324,8 @@ class Session:
         logger.debug('%s, %s -> %s, %s', project, activity, project_id, activity_id)
 
         return ((project_id, project_name), (activity_id, activity_name))
-        
-        
+
+
     def get_projects(self):
         '''
         Returns a list of projects
@@ -376,7 +347,7 @@ class Session:
             raise Exception('Failed to get project help parameters')
 
         help_params = help_match.group().split(', ')
-        
+
         resp = self.session.get(f'{self.baseurl}/Restricted/Frame.aspx',
                                 params={
                                     "Mnu": "937",
@@ -411,7 +382,7 @@ class Session:
             proj_id = s[3]
             proj_name = s[4].replace('&#39;', '') # HTML-encoded single quotes around the string
             projects.append({'id': proj_id, 'name': proj_name})
-        
+
         return projects
 
     def get_activities(self, project_id, project_name):
@@ -427,16 +398,12 @@ class Session:
         java_timestamp = int(datetime.datetime.utcnow().timestamp() * 1000)
         today = datetime.date.today()
         hyphen_date = today.strftime("%Y-%m-%d")
-        
+
         # Mobile reporting page
         resp = self.session.get(f'{self.baseurl}/Restricted/TouchFrame.aspx?Mnu=2329&frm=3&src=2&sn=fb_ctl00_pnlButtonsTouch_G&v={java_timestamp}&pk=0&dk={hyphen_date}&pb=true&rf=false')
 
-        #print(resp.text)
-
         # Select the project, to be able to get the list of activities using the correct parameters
-        bs = bs4.BeautifulSoup(resp.content, 'html.parser')
-        form = bs.select_one('form#frmTouchFrame')
-        form_fields = htmlutils.parse_form_fields(form)
+        form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#frmTouchFrame')
 
         base_fields = {
             "__EVENTTARGET": "",
@@ -449,18 +416,18 @@ class Session:
             "fb$ctl00$ilsRTimesheetCode_Txt_S": "*",
             "fb$ctl00$ttmHTimeFromTo": "",
             "fb$ctl00$ttmHTimeFromTo2": "",
-            
+
             "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt": url_name,
             "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt_S": "*", # Search string used to find project?
             "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt_PK": project_id,
-            
+
             # No activity entered yet
-            
+
             "fb$ctl00$txfFWorkingHours": '0',
-            
+
             "fb$ctl00$txtSText": "time-reporting",
 
-            # TODO: Fill in this values from the response, select: fb$ctl00$ilsRvTimeType$ilsRvTimeType_ddl
+            # TODO: Fill in these values from the response, select: fb$ctl00$ilsRvTimeType$ilsRvTimeType_ddl
             "fb_ctl00_ilsRvTimeType_ilsRvTimeType_fhp_RO_Txt": "0+-+Normal",
             "fb_ctl00_ilsRvTimeType_ilsRvTimeType_fhp_Txt_PK": "13079384",
         }
@@ -480,7 +447,7 @@ class Session:
             raise Exception('Failed to get activity help parameters')
 
         help_params = help_match.group().split(', ')
-        
+
         resp = self.session.get(f'{self.baseurl}/Restricted/Frame.aspx',
                                 params={
 			"Mnu": "937",
@@ -515,5 +482,5 @@ class Session:
             act_id = s[3]
             act_name = s[4].replace('&#39;', '') # HTML-encoded single quotes around the string
             activities.append({'id': act_id, 'name': act_name})
-        
+
         return activities

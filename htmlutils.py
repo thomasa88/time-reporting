@@ -1,3 +1,5 @@
+import bs4
+
 def parse_form_fields(html_form, fields=None):
     # All fields sent through POST has a "name" set
     form_fields = html_form.select('[name]')
@@ -27,3 +29,8 @@ def parse_form_fields(html_form, fields=None):
         else:
             fields[name] = value
     return fields
+
+def form_fields_from_selector(html, selector):
+    bs = bs4.BeautifulSoup(html, 'html.parser')
+    form = bs.select_one(selector)
+    return parse_form_fields(form)
