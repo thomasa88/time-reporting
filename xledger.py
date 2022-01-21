@@ -31,6 +31,35 @@ SESSION_DATA_FILE = 'xledger_data.pickle'
 
 logger = logging.getLogger(__name__)
 
+# Form fields with non-changing values that are always present on the time entry page
+ENTRY_BASE_FIELDS =  {
+                "__EVENTTARGET": "",
+                "__EVENTARGUMENT": "",
+                "__LASTFOCUS": "",
+                "__VIEWSTATE": "",
+                "fb$ctl00$ilsRTimesheetCode_Txt": "",
+                "fb$ctl00$ilsRTimesheetCode_Txt_PK": "0",
+                "fb$ctl00$ilsRTimesheetCode_Txt_S": "*",
+                "fb$ctl00$ttmHTimeFromTo": "",
+                "fb$ctl00$ttmHTimeFromTo2": "",
+
+                # No project entered
+
+                # No activity entered
+
+                "fb$ctl00$txfFWorkingHours": "0",
+
+                ######## Does this need to be added for customer projects?
+                #	"fb$ctl00$txfFInvoiceHours": "",
+
+                "fb$ctl00$txtSText": "time-reporting",
+
+                # TODO: Support Time type (used for e.g. overtime?)
+                # TODO: Fill in these values from the response, select: fb$ctl00$ilsRvTimeType$ilsRvTimeType_ddl
+    #            "fb_ctl00_ilsRvTimeType_ilsRvTimeType_fhp_RO_Txt": "0+-+Normal",
+    #            "fb_ctl00_ilsRvTimeType_ilsRvTimeType_fhp_Txt_PK": "13079384",
+            }
+
 class Session:
     def __init__(self, baseurl, username, ask_password, device_password):
         self.baseurl = baseurl
@@ -226,63 +255,41 @@ class Session:
 
             form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#frmTouchFrame')
 
-            # TODO: Don't use floats, to avoid potential decimal problems
-            hours_str = str(hours).replace('.', ',')
-
             # Set the project
-
-            base_fields = {
-                "__EVENTTARGET": "",
-                "__EVENTARGUMENT": "",
-                "__LASTFOCUS": "",
-                "__VIEWSTATE": "",
+            common_fields = {
                 "fb$ctl00$txdDAssignment": hyphen_date,
-                "fb$ctl00$ilsRTimesheetCode_Txt": "",
-                "fb$ctl00$ilsRTimesheetCode_Txt_PK": "0",
-                "fb$ctl00$ilsRTimesheetCode_Txt_S": "*",
-                "fb$ctl00$ttmHTimeFromTo": "",
-                "fb$ctl00$ttmHTimeFromTo2": "",
-
                 "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt": project_url_name,
                 "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt_S": "*", # Search string used to find project?
                 "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt_PK": project_id,
-
-                # No activity entered yet
-
-                "fb$ctl00$txfFWorkingHours": hours_str,
-
-                ######## Does this need to be added for customer projects?
-                #	"fb$ctl00$txfFInvoiceHours": "",
-
-                "fb$ctl00$txtSText": "time-reporting",
-
-                # TODO: Support Time type (used for e.g. overtime?)
-    #            "fb_ctl00_ilsRvTimeType_ilsRvTimeType_fhp_RO_Txt": "0+-+Normal",
-    #            "fb_ctl00_ilsRvTimeType_ilsRvTimeType_fhp_Txt_PK": "13079384",
-            }
+                **ENTRY_BASE_FIELDS
+                }
 
             fields_proj = {
                 "__PBT75108-2329-3": form_fields["__PBT75108-2329-3"], # Request counter?
                 "__EVENTVALIDATION": form_fields["__EVENTVALIDATION"],
-                **base_fields
+                **common_fields
             }
 
             # We must set the project before we can set an activity
             # (I guess the __PBT counter tracks the session?)
             resp = self.session.post(resp.url,
                                      data=fields_proj)
+            
+            # TODO: Don't use floats, to avoid potential decimal problems
+            hours_str = str(hours).replace('.', ',')
 
             form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#frmTouchFrame')
 
             # Set the activity and save
-
             fields = {
                 "__PBT75108-2329-3": form_fields["__PBT75108-2329-3"], # Request counter?
                 "__EVENTVALIDATION": form_fields["__EVENTVALIDATION"],
-                **base_fields,
+                **common_fields,
                 "fb$ctl00$ilsRvActivity$ilsRvActivity_fhp_Txt": activity_url_name,
                 "fb$ctl00$ilsRvActivity$ilsRvActivity_fhp_Txt_S": "*",
                 "fb$ctl00$ilsRvActivity$ilsRvActivity_fhp_Txt_PK": activity_id,
+
+                "fb$ctl00$txfFWorkingHours": hours_str,
 
                 "fb$ctl00$pnlButtons$T": "" # Save button
             }
@@ -405,37 +412,16 @@ class Session:
         # Select the project, to be able to get the list of activities using the correct parameters
         form_fields = htmlutils.form_fields_from_selector(resp.content, 'form#frmTouchFrame')
 
-        base_fields = {
-            "__EVENTTARGET": "",
-            "__EVENTARGUMENT": "",
-            "__LASTFOCUS": "",
-            "__VIEWSTATE": "",
-            "fb$ctl00$txdDAssignment": hyphen_date,
-            "fb$ctl00$ilsRTimesheetCode_Txt": "",
-            "fb$ctl00$ilsRTimesheetCode_Txt_PK": "0",
-            "fb$ctl00$ilsRTimesheetCode_Txt_S": "*",
-            "fb$ctl00$ttmHTimeFromTo": "",
-            "fb$ctl00$ttmHTimeFromTo2": "",
-
-            "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt": url_name,
-            "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt_S": "*", # Search string used to find project?
-            "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt_PK": project_id,
-
-            # No activity entered yet
-
-            "fb$ctl00$txfFWorkingHours": '0',
-
-            "fb$ctl00$txtSText": "time-reporting",
-
-            # TODO: Fill in these values from the response, select: fb$ctl00$ilsRvTimeType$ilsRvTimeType_ddl
-            "fb_ctl00_ilsRvTimeType_ilsRvTimeType_fhp_RO_Txt": "0+-+Normal",
-            "fb_ctl00_ilsRvTimeType_ilsRvTimeType_fhp_Txt_PK": "13079384",
-        }
-
         fields_proj = {
             "__PBT75108-2329-3": form_fields["__PBT75108-2329-3"], # Request counter?
             "__EVENTVALIDATION": form_fields["__EVENTVALIDATION"],
-            **base_fields
+
+            "fb$ctl00$txdDAssignment": hyphen_date,
+            "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt": url_name,
+            "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt_S": "*", # Search string used to find project?
+            "fb$ctl00$ilsRvProject$ilsRvProject_fhp_Txt_PK": project_id,
+            
+            **ENTRY_BASE_FIELDS
         }
 
         resp = self.session.post(resp.url,
@@ -466,7 +452,7 @@ class Session:
 			"c": help_params[7],
 			"fk2": "0",
 			"oo": "0",
-			"fk": project_id, # project_id
+			"fk": project_id,
 			"lv": "0",
 			"pb": "true",
 			"fk3": "0",
