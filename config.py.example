@@ -25,35 +25,5 @@ min_lunch_duration = datetime.timedelta(minutes=30)
 
 #force_insert_lunch = True
 
-account_mapping = {
-    'generic': [
-        'LUNCH',
-        None,
-        None,
-        None,
-        None
-    ],
-    'timerec': [
-        None
-        ('Customer Co', 'Project A'),
-        ('Customer Co', 'Project B'),
-        ('Consultant Company', 'Interntid'),
-        ('', 'Sjuk'),
-    ],
-    'millnet': [
-        None
-        ('Customer Co TA', 'Konsulttid'),
-        ('Customer Co TA', 'Konsulttid'),
-        ('Interntid', 'Interntid'),
-        ('Frånvaro', 'Sjuk'),
-    ],
-    'flexhrm': [
-        ('lunch', None, None),
-        ('arbete', flexhrm_consultancy_company,
-         'Projekt 1'),
-        ('arbete', flexhrm_consultancy_company,
-         'Projekt 2'),
-        None,
-        None
-    ],
-}
+# Load account mapping from CSV
+from csvmapping import account_mapping
