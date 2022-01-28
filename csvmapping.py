@@ -3,6 +3,8 @@ import os
 from collections import defaultdict
 import logging
 
+logger = logging.getLogger(__name__)
+
 FILE_DIR = os.path.dirname(os.path.realpath(__file__))
 
 account_mapping = defaultdict(list)
@@ -30,4 +32,4 @@ with open(FILE_DIR + '/mapping.csv', newline='') as csv_file:
                 account = None
             account_mapping[system].append(account)
 
-logging.debug(f'CSV Account mapping {account_mapping}')
+logger.debug(f'CSV Account mapping {account_mapping}')
