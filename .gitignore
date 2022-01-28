@@ -5,3 +5,5 @@ __pycache__
 timerec-pro.db
 timerec_temp.gz
 mapping.csv
+.vscode
+tmp
