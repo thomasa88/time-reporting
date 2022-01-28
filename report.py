@@ -33,11 +33,9 @@ import millnet
 import flexhrm
 import xledger
 
-#logging.basicConfig(level=logging.INFO)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('report')
-#stdout_handler = logging.StreamHandler(sys.stdout)
-#logger.addHandler(stdout_handler)
-#logger.setLevel(logging.INFO)
 
 def parse_args():
     arg_parser = argparse.ArgumentParser()
