@@ -24,6 +24,7 @@ import json
 import logging
 import re
 
+import config
 import htmlutils
 import timereporting
 
@@ -61,13 +62,13 @@ ENTRY_BASE_FIELDS =  {
             }
 
 class Session:
-    def __init__(self, baseurl, username, ask_password, device_password):
-        self.baseurl = baseurl
-        self.username = username
-        self.ask_password = ask_password
+    def __init__(self):
+        self.baseurl = config.xledger_baseurl
+        self.username = config.xledger_username
+        self.ask_password = config.xledger_ask_password
         self.password = None
 
-        self.device_password = device_password
+        self.device_password = config.xledger_pair_password
         # Unique ID of the paired device
         self.device_key = None
 

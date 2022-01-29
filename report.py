@@ -53,7 +53,7 @@ def parse_args():
                                help="Don't upload hours to Millnet")
     parser_millnet_report.add_argument('range',
                                help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
-    parser_millnet_report.set_defaults(func=run_millnet_report)
+    parser_millnet_report.set_defaults(func=run_report, mod=millnet)
 
     parser_millnet_dump = millnet_subparsers.add_parser('dump-tasks')
     parser_millnet_dump.set_defaults(func=run_millnet_dump)
@@ -76,7 +76,7 @@ def parse_args():
     parser_flexhrm_find_company.add_argument('name')
 
     parser_flexhrm_report = flexhrm_subparsers.add_parser('report')
-    parser_flexhrm_report.set_defaults(func=run_flexhrm_report)
+    parser_flexhrm_report.set_defaults(func=run_report, mod=flexhrm, insert_lunch=True)
     parser_flexhrm_report.add_argument('-n', '--dry-run', action='store_true',
                                        help="Don't upload hours to FlexHRM")
     parser_flexhrm_report.add_argument('range',
@@ -91,7 +91,7 @@ def parse_args():
                                help="Don't upload hours to Xledger")
     parser_xledger_report.add_argument('range',
                                help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
-    parser_xledger_report.set_defaults(func=run_xledger_report)
+    parser_xledger_report.set_defaults(func=run_report, mod=xledger)
 
     args = arg_parser.parse_args()
 
@@ -100,9 +100,9 @@ def parse_args():
     else:
         logging.basicConfig(level=logging.INFO)
     
-    args.func(args, arg_parser)
+    args.func(args)
 
-def run_timerec_fetch(args, arg_parser):
+def run_timerec_fetch(args):
     logger.info("Downloading Time Recording database...")
     download_timerec_db()
     logger.info("Done")
@@ -153,13 +153,14 @@ def parse_report_range(range_str):
         end_date = begin_date
     return begin_date, end_date
 
-def run_millnet_report(args, arg_parser):
+def run_report(args):
+    insert_lunch = hasattr(args, 'insert_lunch') and args.insert_lunch
+
     begin_date, end_date = parse_report_range(args.range)
 
     logger.info(f"Date range: {begin_date} - {end_date}")
 
-    with millnet.Session(config.millnet_baseurl, config.millnet_username,
-                         config.millnet_ask_password) as m:
+    with args.mod.Session() as m:
         days = []
         one_day = datetime.timedelta(days=1)
         current_date = begin_date
@@ -171,6 +172,11 @@ def run_millnet_report(args, arg_parser):
             millnet_entries = [e for e in entries
                                if convert_entry(e, 'timerec', 'millnet')]
             if millnet_entries:
+                if insert_lunch and config.detect_lunch:
+                    lunch = detect_lunch(millnet_entries)
+                    convert_entry(lunch, 'generic', 'flexhrm')
+                    # TODO: Define __lt__ and use bisect.insort() to keep entries sorted
+                    millnet_entries.append(lunch)
                 days.append((current_date, millnet_entries))
             current_date += one_day
 
@@ -183,90 +189,30 @@ def run_millnet_report(args, arg_parser):
                 m.set_day(date, entries)
         logger.info("Done")
 
-def run_millnet_dump(args, arg_parser):
+def run_millnet_report(args):
+    run_report(millnet)
+
+def run_millnet_dump(args):
     with millnet.Session(config.millnet_baseurl,
                          config.millnet_username,
                          config.millnet_ask_password) as m:
         for row in fetch_millnet_user_activities(m):
             print((row[1], row[0], row[3], row[2]))
 
-def run_flexhrm_find_project(args, arg_parser):
+def run_flexhrm_find_project(args):
     with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
                          config.flexhrm_ask_password) as flex:
         for label, guid in flex.find_project(args.name):
             print(guid, label)
 
-def run_flexhrm_find_company(args, arg_parser):
+def run_flexhrm_find_company(args):
     with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
                          config.flexhrm_ask_password) as flex:
         for label, guid in flex.find_company(args.name):
             print(guid, label)
 
-def run_flexhrm_report(args, arg_parser):
-    begin_date, end_date = parse_report_range(args.range)
-
-    logger.info(f"Date range: {begin_date} - {end_date}")
-
-    with flexhrm.Session(config.flexhrm_baseurl, config.flexhrm_username,
-                         config.flexhrm_ask_password) as flex:
-        days = []
-        one_day = datetime.timedelta(days=1)
-        current_date = begin_date
-        # Collect all data before reporting, to be sure that the mapping succeeds
-        logger.info("Collecting...")
-        tr = timerec.TimeRecording(config.timerec_db_filename)
-        while current_date <= end_date:
-            entries = tr.get_day(current_date)
-            flexhrm_entries = [e for e in entries
-                               if convert_entry(e, 'timerec', 'flexhrm')]
-            if flexhrm_entries:
-                if config.detect_lunch:
-                    lunch = detect_lunch(flexhrm_entries)
-                    convert_entry(lunch, 'generic', 'flexhrm')
-                    # TODO: Define __lt__ and use bisect.insort() to keep entries sorted
-                    flexhrm_entries.append(lunch)
-                days.append((current_date, flexhrm_entries))
-            current_date += one_day
-
-        logger.info("Reporting...")
-        if args.dry_run:
-            logger.info("DRY RUN")
-        for date, entries in days:
-            logger.info(date)
-            if not args.dry_run:
-                flex.set_day(date, entries)
-        logger.info("Done")
-
-def run_xledger_report(args, arg_parser):
-    begin_date, end_date = parse_report_range(args.range)
-
-    logger.info(f"Date range: {begin_date} - {end_date}")
-
-    with xledger.Session(config.xledger_baseurl, config.xledger_username,
-                         config.xledger_ask_password,
-                         config.xledger_pair_password) as x:
-        days = []
-        one_day = datetime.timedelta(days=1)
-        current_date = begin_date
-        # Collect all data before reporting, to be sure that the mapping succeeds
-        logger.info("Collecting...")
-        tr = timerec.TimeRecording(config.timerec_db_filename)
-        while current_date <= end_date:
-            entries = tr.get_day(current_date)
-            xledger_entries = [e for e in entries
-                               if convert_entry(e, 'timerec', 'xledger')]
-            if xledger_entries:
-                days.append((current_date, xledger_entries))
-            current_date += one_day
-
-        logger.info("Reporting...")
-        if args.dry_run:
-            logger.info("DRY RUN")
-        for date, entries in days:
-            logger.info(date)
-            if not args.dry_run:
-                x.set_day(date, entries)
-        logger.info("Done")
+def run_xledger_report(args):
+    run_report(args, xledger)
 
 def detect_lunch(entries):
     # This function assumes that entries are sorted

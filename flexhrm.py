@@ -24,6 +24,7 @@ import bs4
 import html
 import logging
 
+import config
 import htmlutils
 
 COOKIE_FILE = 'flexhrm_cookies.pickle'
@@ -36,10 +37,10 @@ class Session:
     COMPANY_ACCOUNT_COL_INDEX = 4
     PROJECT_ACCOUNT_COL_INDEX = 5
             
-    def __init__(self, baseurl, username, ask_password):
-        self.baseurl = baseurl
-        self.username = username
-        self.ask_password = ask_password
+    def __init__(self):
+        self.baseurl = config.flexhrm_baseurl
+        self.username = config.flexhrm_username
+        self.ask_password = config.flexhrm_ask_password
         self.password = None
         self.token = None
         self.company_id = None

@@ -23,6 +23,7 @@ import time
 import json
 import logging
 
+import config
 import htmlutils
 import timereporting
 
@@ -31,10 +32,10 @@ COOKIE_FILE = 'millnet_cookies.pickle'
 logger = logging.getLogger(__name__)
 
 class Session:
-    def __init__(self, baseurl, username, ask_password):
-        self.baseurl = baseurl
-        self.username = username
-        self.ask_password = ask_password
+    def __init__(self):
+        self.baseurl = config.millnet_baseurl
+        self.username = config.millnet_username
+        self.ask_password = config.millnet_ask_password
         self.password = None
         self.project_list_cache = None
         self.activity_list_cache = {}
