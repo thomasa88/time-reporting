@@ -27,6 +27,8 @@ import config
 import htmlutils
 import timereporting
 
+name = 'millnet'
+
 COOKIE_FILE = 'millnet_cookies.pickle'
 
 logger = logging.getLogger(__name__)

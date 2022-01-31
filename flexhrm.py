@@ -27,6 +27,8 @@ import logging
 import config
 import htmlutils
 
+name = 'flexhrm'
+
 COOKIE_FILE = 'flexhrm_cookies.pickle'
 
 logger = logging.getLogger(__name__)

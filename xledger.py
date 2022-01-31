@@ -28,6 +28,8 @@ import config
 import htmlutils
 import timereporting
 
+name = 'xledger'
+
 SESSION_DATA_FILE = 'xledger_data.pickle'
 
 logger = logging.getLogger(__name__)

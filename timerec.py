@@ -19,6 +19,8 @@ import sqlite3
 import datetime
 import timereporting
 
+name = 'timerec'
+
 CHECK_ACTION_IN = 10
 CHECK_ACTION_OUT = 20
 

@@ -169,15 +169,15 @@ def run_report(args):
         tr = timerec.TimeRecording(config.timerec_db_filename)
         while current_date <= end_date:
             entries = tr.get_day(current_date)
-            millnet_entries = [e for e in entries
-                               if convert_entry(e, 'timerec', 'millnet')]
-            if millnet_entries:
+            target_entries = [e for e in entries
+                               if convert_entry(e, 'timerec', args.mod.name)]
+            if target_entries:
                 if insert_lunch and config.detect_lunch:
-                    lunch = detect_lunch(millnet_entries)
-                    convert_entry(lunch, 'generic', 'flexhrm')
+                    lunch = detect_lunch(target_entries)
+                    convert_entry(lunch, 'generic', args.mod.name)
                     # TODO: Define __lt__ and use bisect.insort() to keep entries sorted
-                    millnet_entries.append(lunch)
-                days.append((current_date, millnet_entries))
+                    target_entries.append(lunch)
+                days.append((current_date, target_entries))
             current_date += one_day
 
         logger.info("Reporting...")
@@ -188,9 +188,6 @@ def run_report(args):
             if not args.dry_run:
                 m.set_day(date, entries)
         logger.info("Done")
-
-def run_millnet_report(args):
-    run_report(millnet)
 
 def run_millnet_dump(args):
     with millnet.Session(config.millnet_baseurl,
