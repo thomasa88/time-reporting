@@ -23,6 +23,7 @@ import time
 import json
 import logging
 import re
+import csv
 
 import config
 import htmlutils
@@ -308,9 +309,9 @@ class Session:
     def _account_to_ids(self, account):
         project, activity = account
 
-        if not self.project_list_cache:
-            self.project_list_cache = {p['name']: p['id']
-                                       for p in self.get_projects()}
+        #if not self.project_list_cache:
+        self.project_list_cache = {p['name']: p['id']
+                                    for p in self.get_projects()}
 
         try:
             project_id = self.project_list_cache[project]
@@ -385,14 +386,8 @@ class Session:
 
         assert resp.status_code == 200
 
-        proj_helps = re.findall('onclick="[^"]+ReturnFieldHelp\((.*?)\)', resp.text)
-        projects = []
-        for proj_help in proj_helps:
-            s = proj_help.split(', ')
-            proj_id = s[3]
-            proj_name = s[4].replace('&#39;', '') # HTML-encoded single quotes around the string
-            projects.append({'id': proj_id, 'name': proj_name})
-
+        proj_helps = re.findall('onclick="[^"]+ReturnFieldHelp\((.*?)\);"', resp.text)
+        projects = self._id_name_from_field_helps(proj_helps)
         return projects
 
     def get_activities(self, project_id, project_name):
@@ -464,12 +459,30 @@ class Session:
 
         assert resp.status_code == 200
 
-        act_helps = re.findall('onclick="[^"]+ReturnFieldHelp\((.*?)\)', resp.text)
-        activities = []
-        for act_help in act_helps:
-            s = act_help.split(', ')
-            act_id = s[3]
-            act_name = s[4].replace('&#39;', '') # HTML-encoded single quotes around the string
-            activities.append({'id': act_id, 'name': act_name})
+        act_helps = re.findall(r'GetTop\(\)\.ReturnFieldHelp\((.*?)\);', resp.text)
+        activities = self._id_name_from_field_helps(act_helps)
 
         return activities
+
+    def _id_name_from_field_helps(self, field_helps):
+        '''
+        Parses the arguments from a list of function call like this:
+        ReturnFieldHelp(3, 4, 'fb_ctl00_ilsRvActivity_ilsRvActivity_fhp_Txt', 3938933,
+        "Activity Name", true, false);
+
+        Expected element format:
+        3, 4, 'fb_ctl00_ilsRvActivity_ilsRvActivity_fhp_Txt', 3938933,
+        "Activity Name", true, false
+        '''
+        objects = []
+        
+        # HTML-encoded single quotes around the string (&#39;)
+        reader = csv.reader([h.replace('&#39;', '"') for h in field_helps],
+                            delimiter=',', quotechar='"', skipinitialspace=True,
+                            doublequote=False, escapechar='\\')
+        for obj_help in reader:
+            obj_id = obj_help[3]
+            obj_name = obj_help[4]
+            objects.append({'id': obj_id, 'name': obj_name})
+        
+        return objects
