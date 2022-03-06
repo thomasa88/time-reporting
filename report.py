@@ -20,10 +20,12 @@
 import argparse
 import calendar
 from collections import defaultdict
+from csv import excel_tab
 import datetime
 import gzip
 import sys
 import logging
+import json
 
 import timereporting
 import config
@@ -79,6 +81,8 @@ def parse_args():
     parser_flexhrm_report.set_defaults(func=run_report, mod=flexhrm, insert_lunch=True)
     parser_flexhrm_report.add_argument('-n', '--dry-run', action='store_true',
                                        help="Don't upload hours to FlexHRM")
+    parser_flexhrm_report.add_argument('-j', '--json', action='store_true',
+                                       help="Dump data, for example for Javascript consumption")
     parser_flexhrm_report.add_argument('range',
                                        help='Date range. YYMMDD-YYMMDD for range, YYMM for a full month, YYMMDD for one day')
 
@@ -154,40 +158,62 @@ def parse_report_range(range_str):
     return begin_date, end_date
 
 def run_report(args):
+    target = args.mod
     insert_lunch = hasattr(args, 'insert_lunch') and args.insert_lunch
 
     begin_date, end_date = parse_report_range(args.range)
 
     logger.info(f"Date range: {begin_date} - {end_date}")
+    
+    # Collect all data before reporting, to be sure that the mapping succeeds
+    logger.info("Collecting...")
+    days = collect_days(timerec, target, begin_date, end_date, insert_lunch)
 
-    with args.mod.Session() as m:
-        days = []
-        one_day = datetime.timedelta(days=1)
-        current_date = begin_date
-        # Collect all data before reporting, to be sure that the mapping succeeds
-        logger.info("Collecting...")
-        tr = timerec.TimeRecording(config.timerec_db_filename)
+    if args.json:
+        def json_format(obj):
+            if isinstance(obj, datetime.date) or isinstance(obj, datetime.time):
+                return str(obj)
+            return ""
+        dump_days = []
+        for date, entries in days:
+            dump_entries = []
+            for entry in entries:
+                dump_entries.append( { 'begin_time': str(entry.begin_time),
+                                       'end_time': str(entry.end_time),
+                                       'account': entry.account[target.name],
+                                       'comment': entry.comment })
+            dump_day = {'date': str(date), 'entries': dump_entries }
+            dump_days.append(dump_day)
+        print(json.dumps({'system': target.name, 'days': dump_days, 'len': len(dump_days)}))
+    else:
+        with target.Session() as m:
+            logger.info("Reporting...")
+            if args.dry_run:
+                logger.info("DRY RUN")
+            for date, entries in days:
+                logger.info(date)
+                if not args.dry_run:
+                    m.set_day(date, entries)
+            logger.info("Done")
+
+def collect_days(source_mod, target_mod, begin_date, end_date, insert_lunch):
+    days = []
+    one_day = datetime.timedelta(days=1)
+    current_date = begin_date
+    with source_mod.Session() as source:
         while current_date <= end_date:
-            entries = tr.get_day(current_date)
+            entries = source.get_day(current_date)
             target_entries = [e for e in entries
-                               if convert_entry(e, 'timerec', args.mod.name)]
+                                if convert_entry(e, source_mod.name, target_mod.name)]
             if target_entries:
                 if insert_lunch and config.detect_lunch:
-                    lunch = detect_lunch(target_entries)
-                    convert_entry(lunch, 'generic', args.mod.name)
+                    lunch = detect_lunch(target_entries, current_date)
+                    convert_entry(lunch, 'generic', target_mod.name)
                     # TODO: Define __lt__ and use bisect.insort() to keep entries sorted
                     target_entries.append(lunch)
                 days.append((current_date, target_entries))
             current_date += one_day
-
-        logger.info("Reporting...")
-        if args.dry_run:
-            logger.info("DRY RUN")
-        for date, entries in days:
-            logger.info(date)
-            if not args.dry_run:
-                m.set_day(date, entries)
-        logger.info("Done")
+    return days
 
 def run_millnet_dump(args):
     with millnet.Session(config.millnet_baseurl,
@@ -211,7 +237,7 @@ def run_flexhrm_find_company(args):
 def run_xledger_report(args):
     run_report(args, xledger)
 
-def detect_lunch(entries):
+def detect_lunch(entries, current_date):
     # This function assumes that entries are sorted
     # TODO: Expand lunch to be longer than the minimum time
     min_begin = datetime.time(10, 30)
@@ -224,11 +250,11 @@ def detect_lunch(entries):
             begin = entry.end_time
             end = (datetime.datetime.combine(datetime.datetime.min, entry.end_time) + config.min_lunch_duration).time()
     if end > max_end:
-        raise Exception('Failed to find lunch slot', entries)
+        raise Exception('Failed to find lunch slot', current_date, entries)
     lunch = timereporting.Entry()
     lunch.begin_time = begin
     lunch.end_time = end
-    lunch.account['generic'] = 'LUNCH'
+    lunch.account['generic'] = ('LUNCH', )
     return lunch
         
 def convert_entry(entry, from_system, to_system):
@@ -238,7 +264,11 @@ def convert_entry(entry, from_system, to_system):
     Returns True if the entry should be counted in the to_system.
     '''
     index = config.account_mapping[from_system].index(entry.account[from_system])
-    value = config.account_mapping[to_system][index]
+    try:
+        value = config.account_mapping[to_system][index]
+    except IndexError:
+        raise Exception(f'Could not convert entry from "{from_system}" to "{to_system}": {entry.account[from_system]}\n'
+                        'Check your config.')
     entry.account[to_system] = value
     return value is not None
 

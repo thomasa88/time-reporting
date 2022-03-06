@@ -17,17 +17,26 @@
 
 import sqlite3
 import datetime
+
 import timereporting
+import config
 
 name = 'timerec'
 
 CHECK_ACTION_IN = 10
 CHECK_ACTION_OUT = 20
 
-class TimeRecording:
+class Session:
 
-    def __init__(self, database):
-        self.conn = sqlite3.connect(database)
+    def __init__(self):
+        pass
+    
+    def __enter__(self):
+        self.conn = sqlite3.connect(config.timerec_db_filename)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.conn.close()
 
     def get_day(self, date):
         date_str = date.strftime("%Y-%m-%d 00:00:00")
@@ -68,6 +77,6 @@ class TimeRecording:
 
         if last_action != CHECK_ACTION_OUT and current_entry:
             print("Last action was not check")
-            raise Exception(f"Non-completed entry: {current_entry}")
+            raise Exception(f"Non-completed entry: {date} {current_entry}")
 
         return entries 
