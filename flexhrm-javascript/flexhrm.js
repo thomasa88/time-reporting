@@ -34,6 +34,7 @@ async function waitFor(func, ...args) {
     await sleep(1000);
   }
   console.log('    Not found');
+  throw new Error('Not found');
 }
 
 async function waitForElem(selector) {
@@ -142,12 +143,21 @@ async function clearDay() {
   }
 }
 
-async function parseDump(data) {
+async function reportDump(data) {
   if (data['system'] != 'flexhrm') {
     alert('Wrong system');
   } else if (data['days'].length != data['len']) {
     alert('Wrong length');
   } else {
+    // Go to the time reporting page
+    let startBtn = isVisible('#tidrapport.startButton');
+    if (startBtn) {
+      startBtn.click();
+    }
+
+    // Make sure we are on the right page
+    waitVisibleXpath('//div[.="Tidrapport"]');
+
     for (const day of data['days']) {
       console.log('Day', day['date']);
       await goToDate(day['date']);
@@ -187,7 +197,7 @@ async function report() {
       alert(e);
     }
     if (data) {
-      await parseDump(data);
+      await reportDump(data);
       console.log('Done');
     }
   }
